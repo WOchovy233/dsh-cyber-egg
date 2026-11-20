@@ -1,10 +1,10 @@
 {
-  "version": "1.4.3",
-  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.3/cyber-egg-1.4.3.tgz",
+  "version": "1.4.4",
+  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.4/cyber-egg-1.4.4.tgz",
   "tarballMirrors": [
-    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.3/cyber-egg-1.4.3.tgz",
-    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.3/cyber-egg-1.4.3.tgz"
+    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.4/cyber-egg-1.4.4.tgz",
+    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.4/cyber-egg-1.4.4.tgz"
   ],
-  "sha256": "1F60D0A018B463F7B5299DEA008443EE0A437B24979F84DD74EB789DE59409ED",
-  "notes": "1.4.3：匿名免费新增 Pollinations 免注册池（免 Key，免费额度为每 IP 每 45 秒 1 次）；新增「体检可用性」：逐个发「你好」，只留能聊的，连不上的自动移除并记入屏蔽表（可一键恢复），被限流的不误删；点检查更新 / 更新成功后会自动体检一次；桌面端与安卓 DSH Go 用同一安装包。"
+  "sha256": "D8690CF4F62E78C221424E23CC9EB5DEFBA04B5C246181465116309DF0E21FFC",
+  "notes": "1.4.4：修复更新按钮的两个 bug——本地版本号读不到时被当成 0.0.0，导致已经是新版还一直提示「更新到 vX」；重复安装同一个版本的包时不再报「更新失败」，改为提示已是最新。桌面端与安卓 DSH Go 同步更新。"
 }
