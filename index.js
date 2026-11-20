@@ -35,6 +35,9 @@ function emptyState() {
     lastRun: null,
     radar: { at: null, freeCount: 0, ids: [], newIds: [], items: [], source: null, warning: null, error: null },
     kilo: { at: null, items: [], error: null },
+    pollinations: { at: null, items: [], error: null },
+    anonBlocked: [],
+    anonHealth: null,
     feeds: [],
     feedSources: [],
     feedNewIds: [],
@@ -58,6 +61,9 @@ function loadState() {
         today: parsed.today && typeof parsed.today === 'object' ? parsed.today : {},
         radar: { ...base.radar, ...(parsed.radar || {}) },
         kilo: { ...base.kilo, ...(parsed.kilo || {}) },
+        pollinations: { ...base.pollinations, ...(parsed.pollinations || {}) },
+        anonBlocked: Array.isArray(parsed.anonBlocked) ? parsed.anonBlocked : [],
+        anonHealth: parsed.anonHealth && typeof parsed.anonHealth === 'object' ? parsed.anonHealth : null,
         feeds: Array.isArray(parsed.feeds) ? parsed.feeds : [],
         feedSources: Array.isArray(parsed.feedSources) ? parsed.feedSources : [],
         feedNewIds: Array.isArray(parsed.feedNewIds) ? parsed.feedNewIds : [],
@@ -354,8 +360,14 @@ async function refreshFeeds(state) {
 async function refreshAll(state, force = true) {
   const [radar, feeds] = await Promise.all([refreshRadar(state), refreshFeeds(state)])
   await refreshKilo(state, force)
+  await refreshPollinations(state, force)
   saveState(state)
-  return { radar, feeds, kilo: { ok: !state.kilo?.error, count: state.kilo?.items?.length || 0 } }
+  return {
+    radar,
+    feeds,
+    kilo: { ok: !state.kilo?.error, count: state.kilo?.items?.length || 0 },
+    pollinations: { ok: !state.pollinations?.error, count: state.pollinations?.items?.length || 0 },
+  }
 }
 
 /* ------------------------------------------------------- kilo anonymous */
@@ -480,7 +492,8 @@ async function refreshKilo(state, force) {
     return { ok: true, cached: true, count: state.kilo.items.length }
   }
   try {
-    const items = await fetchKiloFree()
+    const blocked = new Set(state.anonBlocked || [])
+    const items = (await fetchKiloFree()).filter(item => !blocked.has(item.id))
     state.kilo = { at: new Date().toISOString(), items, error: null }
     return { ok: true, count: items.length }
   } catch (error) {
@@ -596,6 +609,264 @@ async function testKilo(ctx) {
     error: failure || undefined,
   }
 }
+
+
+/* ------------------------------------------- anonymous free (Pollinations) */
+
+const POLLINATIONS_BASE = 'https://text.pollinations.ai'
+const POLLINATIONS_ROUTE = 'pollinations-free'
+const POLLINATIONS_REF = 'POLLINATIONS_FREE_NOAUTH'
+const POLLINATIONS_DISPLAY = 'Pollinations 免注册 · 赛博鸡蛋'
+
+async function fetchPollinationsFree() {
+  const payload = await getJson(`${POLLINATIONS_BASE}/models`, 20000)
+  const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : []
+  return rows
+    .filter(row => row && String(row.tier || '').toLowerCase() === 'anonymous')
+    .filter(row => {
+      const outputs = row.output_modalities
+      return !Array.isArray(outputs) || outputs.length === 0 || outputs.includes('text')
+    })
+    .map(row => {
+      const id = String(row.name || row.id || '')
+      return {
+        id,
+        name: String(row.description || row.name || id),
+        vendor: 'pollinations',
+        context: Number(row.context_length) || 0,
+        mayTrain: false,
+        audioOnly: false,
+        note: '每个 IP 每 45 秒 1 次',
+      }
+    })
+    .filter(item => item.id)
+}
+
+async function refreshPollinations(state, force) {
+  const cacheAt = state.pollinations?.at ? Date.parse(state.pollinations.at) : 0
+  const fresh = cacheAt && Date.now() - cacheAt < 10 * 60 * 1000
+  if (!force && fresh && Array.isArray(state.pollinations.items) && state.pollinations.items.length) {
+    return { ok: true, cached: true, count: state.pollinations.items.length }
+  }
+  try {
+    const blocked = new Set(state.anonBlocked || [])
+    const items = (await fetchPollinationsFree()).filter(item => !blocked.has(item.id))
+    state.pollinations = { at: new Date().toISOString(), items, error: null }
+    return { ok: true, count: items.length }
+  } catch (error) {
+    const message = describeNetworkError(error, 20000)
+    state.pollinations = { ...(state.pollinations || { items: [] }), at: new Date().toISOString(), error: message }
+    return { ok: false, error: message }
+  }
+}
+
+function anonInstalledModels(descriptor, routeId) {
+  const providers = descriptor?.value?.providers
+  const profile = providers && providers[routeId]
+  const models = Array.isArray(profile?.models) ? profile.models : []
+  return models.map(model => (typeof model === 'string' ? model : model?.id)).filter(Boolean)
+}
+
+async function installPollinations(ctx, state, body) {
+  const settings = ctx.get('settings')
+  if (!settings) throw new Error('settings 服务不可用')
+  const descriptor = providerDescriptor(settings)
+  if (!Array.isArray(state.pollinations?.items) || !state.pollinations.items.length) await refreshPollinations(state, true)
+  const blocked = new Set(state.anonBlocked || [])
+  const available = new Map((state.pollinations?.items || []).filter(item => !blocked.has(item.id)).map(item => [item.id, item]))
+  const providers = descriptor.value && descriptor.value.providers
+  const profile = providers && providers[POLLINATIONS_ROUTE]
+  const existingEntries = (Array.isArray(profile?.models) ? profile.models : [])
+    .map(model => (typeof model === 'string' ? { id: model } : model))
+    .filter(model => model && model.id)
+  const requested = Array.isArray(body.models) && body.models.length
+    ? body.models.map(id => String(id))
+    : body.all
+      ? [...available.keys()]
+      : []
+  if (!requested.length) throw new Error('没有选择要启用的模型')
+  const merged = new Map(body.prune === true ? [] : existingEntries.map(entry => [entry.id, entry]))
+  for (const id of requested) {
+    if (!available.has(id)) throw new Error(`Pollinations 免费池里没有这个模型：${id}`)
+    const item = available.get(id)
+    if (!merged.has(id)) merged.set(id, { id: item.id, ...(item.name && item.name !== item.id ? { name: item.name } : {}) })
+  }
+  const value = {
+    displayName: POLLINATIONS_DISPLAY,
+    api: 'openai-completions',
+    baseURL: `${POLLINATIONS_BASE}/openai`,
+    apiKeyEnv: POLLINATIONS_REF,
+    models: [...merged.values()].slice(0, 12),
+  }
+  const credentials = ctx.get('credentials')
+  if (credentials) await credentials.set(POLLINATIONS_REF, 'pollinations-free-noauth')
+  await settings.mutate(descriptor.ns, [{ op: 'set', path: ['providers', POLLINATIONS_ROUTE], value }], descriptor.revision)
+  saveState(state)
+  let registered = false
+  try {
+    registered = (ctx.get('llm')?.listProviders?.() || []).some(item => item.id === POLLINATIONS_ROUTE)
+  } catch {
+    registered = false
+  }
+  return { ok: true, routeId: POLLINATIONS_ROUTE, installed: value.models.map(model => model.id), registered }
+}
+
+/* ------------------------------------------------------- anonymous health */
+
+const ANON_ROUTES = {
+  [KILO_ROUTE]: {
+    label: 'Kilo 免费池',
+    url: `${KILO_BASE}/chat/completions`,
+    headers: KILO_LISTING_HEADERS,
+    timeoutMs: 90000,
+  },
+  [POLLINATIONS_ROUTE]: {
+    label: 'Pollinations',
+    url: `${POLLINATIONS_BASE}/openai/chat/completions`,
+    headers: {},
+    timeoutMs: 60000,
+  },
+}
+
+const RATE_LIMIT_HINT = /sign up for free|rate.?limit|too many requests|free limit|come back later|quota/i
+
+async function probeAnonModel(routeId, modelId) {
+  const route = ANON_ROUTES[routeId]
+  if (!route) return { route: routeId, id: modelId, ok: false, error: '未知的匿名路由' }
+  let last = null
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    last = await probeAnonOnce(routeId, route, modelId)
+    if (last.ok || !last.rateLimited) return last
+    await new Promise(resolve => setTimeout(resolve, 8000 * attempt))
+  }
+  return last
+}
+
+async function probeAnonOnce(routeId, route, modelId) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), route.timeoutMs)
+  const started = Date.now()
+  try {
+    const res = await fetch(route.url, {
+      method: 'POST',
+      headers: { ...route.headers, 'content-type': 'application/json', 'user-agent': 'dsh-cyber-egg' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: modelId,
+        messages: [{ role: 'user', content: '你好' }],
+        max_tokens: 1400,
+        stream: false,
+      }),
+    })
+    const text = await res.text()
+    let payload = {}
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      payload = {}
+    }
+    const choice = payload?.choices?.[0]
+    const content = String(choice?.message?.content ?? '').trim()
+    const reasoning = String(choice?.message?.reasoning_content ?? choice?.message?.reasoning ?? '').trim()
+    const upstream = String(payload?.error?.message ?? '').replace(/\s+/g, ' ')
+    const ok = res.ok && Boolean(content || reasoning)
+    const rateLimited = !ok && (res.status === 429 || res.status === 402 || RATE_LIMIT_HINT.test(upstream))
+    return {
+      route: routeId,
+      id: modelId,
+      ok,
+      rateLimited,
+      status: res.status,
+      ms: Date.now() - started,
+      reply: content.slice(0, 40) || (reasoning ? '（只出思维链）' : ''),
+      finish: choice?.finish_reason ?? null,
+      error: ok
+        ? undefined
+        : String(upstream || `HTTP ${res.status}${choice?.finish_reason ? ` · finish=${choice.finish_reason}` : ''}`).slice(0, 160),
+    }
+  } catch (error) {
+    return {
+      route: routeId,
+      id: modelId,
+      ok: false,
+      rateLimited: false,
+      status: 0,
+      ms: Date.now() - started,
+      error: error?.name === 'AbortError' ? `超时（${Math.round(route.timeoutMs / 1000)} 秒）` : String(error?.message || error),
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Send "你好" to every enabled anonymous model and (by default) drop the ones that
+ * cannot answer. Probes run one at a time: the free pools throttle concurrent
+ * requests, and a 429/402/quota answer means "slow down", not "dead model" — those
+ * stay enabled and only hard failures (timeouts, missing models, repeated empty
+ * replies) are removed and remembered in `state.anonBlocked`.
+ */
+async function healthCheckAnon(ctx, state, options) {
+  const prune = options?.prune !== false
+  const settings = ctx.get('settings')
+  if (!settings) throw new Error('settings 服务不可用')
+  const descriptor = providerDescriptor(settings)
+  const targets = []
+  for (const routeId of Object.keys(ANON_ROUTES)) {
+    for (const id of anonInstalledModels(descriptor, routeId)) targets.push({ routeId, id })
+  }
+  if (!targets.length) {
+    return { ok: true, checked: 0, kept: [], failed: [], removed: 0, rateLimited: 0, note: '还没有启用任何匿名免费模型' }
+  }
+  const results = []
+  for (const target of targets) {
+    results.push(await probeAnonModel(target.routeId, target.id))
+    await new Promise(resolve => setTimeout(resolve, 2500))
+  }
+  results.sort((left, right) => `${left.route}:${left.id}`.localeCompare(`${right.route}:${right.id}`))
+  const rateLimited = results.filter(item => !item.ok && item.rateLimited)
+  const failed = results.filter(item => !item.ok && !item.rateLimited)
+  let removed = 0
+  if (prune && failed.length) {
+    const drop = new Set(failed.map(item => item.id))
+    const providers = descriptor.value?.providers || {}
+    const ops = []
+    for (const routeId of Object.keys(ANON_ROUTES)) {
+      const profile = providers[routeId]
+      if (!profile) continue
+      const previous = Array.isArray(profile.models) ? profile.models : []
+      const models = previous.filter(model => !drop.has(typeof model === 'string' ? model : model?.id))
+      if (models.length === previous.length) continue
+      ops.push({ op: 'set', path: ['providers', routeId], value: { ...profile, models } })
+    }
+    if (ops.length) await settings.mutate(descriptor.ns, ops, descriptor.revision)
+    state.anonBlocked = [...new Set([...(state.anonBlocked || []), ...drop])]
+    if (Array.isArray(state.kilo?.items)) state.kilo.items = state.kilo.items.filter(item => !drop.has(item.id))
+    if (Array.isArray(state.pollinations?.items)) {
+      state.pollinations.items = state.pollinations.items.filter(item => !drop.has(item.id))
+    }
+    removed = failed.length
+  }
+  state.anonHealth = {
+    at: new Date().toISOString(),
+    checked: results.length,
+    kept: results.filter(item => item.ok).length,
+    rateLimited: rateLimited.length,
+    removed,
+  }
+  saveState(state)
+  return {
+    ok: true,
+    checked: results.length,
+    kept: results.filter(item => item.ok).map(item => item.id),
+    failed: failed.map(item => ({ route: item.route, id: item.id, error: item.error })),
+    rateLimited: rateLimited.map(item => ({ route: item.route, id: item.id, error: item.error })),
+    results,
+    removed,
+    prune,
+  }
+}
+
 
 
 function sourcePool(state) {
@@ -1054,19 +1325,22 @@ function snapshot(ctx, state) {
     modelCount: installed[source.id]?.models?.length || 0,
     fresh: (state.feedNewIds || []).includes(source.id),
   })
-  const kiloItems = state.kilo?.items || []
-  const kiloInstalled = (() => {
+  const descriptor = (() => {
     try {
       const settings = ctx.get('settings')
-      if (!settings) return []
-      return kiloInstalledModels(providerDescriptor(settings))
+      return settings ? providerDescriptor(settings) : null
     } catch {
-      return []
+      return null
     }
   })()
+  const installedFor = routeId => (descriptor ? anonInstalledModels(descriptor, routeId) : [])
+  const kiloItems = state.kilo?.items || []
+  const kiloInstalled = installedFor(KILO_ROUTE)
+  const pollinationsItems = state.pollinations?.items || []
+  const pollinationsInstalled = installedFor(POLLINATIONS_ROUTE)
   return {
     ok: true,
-    build: '1.4.2',
+    build: '1.4.3',
     sources: [...catalog.map(decorate), ...(state.feedSources || []).map(decorate)],
     accessLabels,
     radar: state.radar || null,
@@ -1076,6 +1350,17 @@ function snapshot(ctx, state) {
       items: kiloItems,
       installed: kiloInstalled,
       stale: kiloInstalled.filter(id => !kiloItems.some(item => item.id === id)),
+    },
+    pollinations: {
+      at: state.pollinations?.at || null,
+      error: state.pollinations?.error || null,
+      items: pollinationsItems,
+      installed: pollinationsInstalled,
+      stale: pollinationsInstalled.filter(id => !pollinationsItems.some(item => item.id === id)),
+    },
+    anon: {
+      blocked: state.anonBlocked || [],
+      health: state.anonHealth || null,
     },
     feeds: state.feeds || [],
     protocols: relayProtocols,
@@ -1489,6 +1774,35 @@ export function apply(ctx, config = {}) {
       if (credentials) await credentials.unset(KILO_REF).catch(() => {})
       return { ok: true, state: snapshot(ctx, state) }
     },
+    pollinationsModels: async body => {
+      const outcome = await refreshPollinations(state, body?.force !== false)
+      saveState(state)
+      return { ok: true, ...outcome, state: snapshot(ctx, state) }
+    },
+    pollinationsInstall: async body => {
+      const result = await installPollinations(ctx, state, body)
+      return { ...result, state: snapshot(ctx, state) }
+    },
+    pollinationsUninstall: async () => {
+      const settings = ctx.get('settings')
+      if (!settings) throw new Error('settings 服务不可用')
+      const descriptor = providerDescriptor(settings)
+      await settings.mutate(descriptor.ns, [{ op: 'unset', path: ['providers', POLLINATIONS_ROUTE] }], descriptor.revision)
+      const credentials = ctx.get('credentials')
+      if (credentials) await credentials.unset(POLLINATIONS_REF).catch(() => {})
+      return { ok: true, state: snapshot(ctx, state) }
+    },
+    anonHealth: async body => {
+      const result = await healthCheckAnon(ctx, state, { prune: body?.prune !== false })
+      return { ...result, state: snapshot(ctx, state) }
+    },
+    anonUnblock: async body => {
+      const ids = Array.isArray(body?.ids) ? body.ids.map(String) : []
+      const before = state.anonBlocked || []
+      state.anonBlocked = ids.length ? before.filter(id => !ids.includes(id)) : []
+      saveState(state)
+      return { ok: true, unblocked: before.length - state.anonBlocked.length, state: snapshot(ctx, state) }
+    },
     updateCheck: async () => checkUpdate(state, config),
     updateInstall: async body => installUpdate(ctx, state, body, config),
     updateVerify: async body => verifyUpdate(ctx, String(body?.path || '')),
@@ -1597,6 +1911,10 @@ export function apply(ctx, config = {}) {
             json(res, 200, await handlers.kiloModels({ force: true }))
             return
           }
+          if (req.method === 'GET' && route === '/pollinations/models') {
+            json(res, 200, await handlers.pollinationsModels({ force: true }))
+            return
+          }
           if (req.method !== 'POST') {
             json(res, 405, { ok: false, error: 'method not allowed' })
             return
@@ -1615,6 +1933,11 @@ export function apply(ctx, config = {}) {
           if (route === '/kilo/uninstall') return json(res, 200, await handlers.kiloUninstall(body))
           if (route === '/kilo/test') return json(res, 200, await handlers.kiloTest(body))
           if (route === '/kilo/models') return json(res, 200, await handlers.kiloModels(body))
+          if (route === '/pollinations/models') return json(res, 200, await handlers.pollinationsModels(body))
+          if (route === '/pollinations/install') return json(res, 200, await handlers.pollinationsInstall(body))
+          if (route === '/pollinations/uninstall') return json(res, 200, await handlers.pollinationsUninstall(body))
+          if (route === '/anon/health') return json(res, 200, await handlers.anonHealth(body))
+          if (route === '/anon/unblock') return json(res, 200, await handlers.anonUnblock(body))
           if (route === '/feeds') return json(res, 200, await handlers.feed(body))
           if (route === '/relay/save') return json(res, 200, await handlers.saveRelay(body))
           if (route === '/relay/delete') return json(res, 200, await handlers.deleteRelay(body))
@@ -1634,7 +1957,7 @@ export function apply(ctx, config = {}) {
     scheduler = stopScheduler
     const disposeTool = registerTool(ctx, state, handlers)
     const radarTimer = setTimeout(() => {
-      Promise.allSettled([refreshRadar(state), refreshKilo(state, false)])
+      Promise.allSettled([refreshRadar(state), refreshKilo(state, false), refreshPollinations(state, false)])
         .then(() => saveState(state))
         .catch(() => {})
     }, 4000)
