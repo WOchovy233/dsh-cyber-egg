@@ -11,7 +11,7 @@ const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
 // Keep in sync with package.json; the update check falls back to this when the
 // loader gives us an entry URL that does not sit next to package.json.
-const PLUGIN_VERSION = '1.4.8'
+const PLUGIN_VERSION = '1.5.0'
 
 /**
  * Release signing key (Ed25519, public half). The private half lives outside the
@@ -50,6 +50,7 @@ function emptyState() {
     radar: { at: null, freeCount: 0, ids: [], newIds: [], items: [], source: null, warning: null, error: null },
     kilo: { at: null, items: [], error: null },
     pollinations: { at: null, items: [], error: null },
+    llm7: { at: null, items: [], error: null },
     anonBlocked: [],
     anonHealth: null,
     feeds: [],
@@ -76,6 +77,7 @@ function loadState() {
         radar: { ...base.radar, ...(parsed.radar || {}) },
         kilo: { ...base.kilo, ...(parsed.kilo || {}) },
         pollinations: { ...base.pollinations, ...(parsed.pollinations || {}) },
+        llm7: { ...base.llm7, ...(parsed.llm7 || {}) },
         anonBlocked: Array.isArray(parsed.anonBlocked) ? parsed.anonBlocked : [],
         anonHealth: parsed.anonHealth && typeof parsed.anonHealth === 'object' ? parsed.anonHealth : null,
         feeds: Array.isArray(parsed.feeds) ? parsed.feeds : [],
@@ -391,12 +393,14 @@ async function refreshAll(state, force = true) {
   const [radar, feeds] = await Promise.all([refreshRadar(state), refreshFeeds(state)])
   await refreshKilo(state, force)
   await refreshPollinations(state, force)
+  await refreshLlm7(state, force)
   saveState(state)
   return {
     radar,
     feeds,
     kilo: { ok: !state.kilo?.error, count: state.kilo?.items?.length || 0 },
     pollinations: { ok: !state.pollinations?.error, count: state.pollinations?.items?.length || 0 },
+    llm7: { ok: !state.llm7?.error, count: state.llm7?.items?.length || 0 },
   }
 }
 
@@ -763,6 +767,96 @@ async function installPollinations(ctx, state, body) {
   return { ok: true, routeId: POLLINATIONS_ROUTE, installed: value.models.map(model => model.id), registered }
 }
 
+/* ----------------------------------------------- anonymous free (LLM7 pool) */
+
+const LLM7_BASE = 'https://api.llm7.io/v1'
+const LLM7_ROUTE = 'llm7-free'
+const LLM7_REF = 'LLM7_FREE_NOAUTH'
+const LLM7_DISPLAY = 'LLM7 免注册 · 赛博鸡蛋'
+
+async function fetchLlm7Free() {
+  const payload = await getJson(`${LLM7_BASE}/models`, 20000)
+  const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : []
+  return rows
+    .filter(row => row && String(row.tier || '').toLowerCase() !== 'pro')
+    .filter(row => !row.model_type || String(row.model_type).toLowerCase() === 'chat')
+    .map(row => {
+      const id = String(row.id || '')
+      return {
+        id,
+        name: id,
+        vendor: 'llm7',
+        context: 0,
+        mayTrain: false,
+        audioOnly: false,
+        note: '免费额度很少',
+      }
+    })
+    .filter(item => item.id)
+}
+
+async function refreshLlm7(state, force) {
+  const cacheAt = state.llm7?.at ? Date.parse(state.llm7.at) : 0
+  const fresh = cacheAt && Date.now() - cacheAt < 10 * 60 * 1000
+  if (!force && fresh && Array.isArray(state.llm7.items) && state.llm7.items.length) {
+    return { ok: true, cached: true, count: state.llm7.items.length }
+  }
+  try {
+    const blocked = new Set(state.anonBlocked || [])
+    const items = (await fetchLlm7Free()).filter(item => !blocked.has(item.id))
+    state.llm7 = { at: new Date().toISOString(), items, error: null }
+    return { ok: true, count: items.length }
+  } catch (error) {
+    const message = describeNetworkError(error, 20000)
+    state.llm7 = { ...(state.llm7 || { items: [] }), at: new Date().toISOString(), error: message }
+    return { ok: false, error: message }
+  }
+}
+
+async function installLlm7(ctx, state, body) {
+  const settings = ctx.get('settings')
+  if (!settings) throw new Error('settings 服务不可用')
+  const descriptor = providerDescriptor(settings)
+  if (!Array.isArray(state.llm7?.items) || !state.llm7.items.length) await refreshLlm7(state, true)
+  const blocked = new Set(state.anonBlocked || [])
+  const available = new Map((state.llm7?.items || []).filter(item => !blocked.has(item.id)).map(item => [item.id, item]))
+  const providers = descriptor.value && descriptor.value.providers
+  const profile = providers && providers[LLM7_ROUTE]
+  const existingEntries = (Array.isArray(profile?.models) ? profile.models : [])
+    .map(model => (typeof model === 'string' ? { id: model } : model))
+    .filter(model => model && model.id)
+  const requested = Array.isArray(body.models) && body.models.length
+    ? body.models.map(id => String(id))
+    : body.all
+      ? [...available.keys()]
+      : []
+  if (!requested.length) throw new Error('没有选择要启用的模型')
+  const merged = new Map(body.prune === true ? [] : existingEntries.map(entry => [entry.id, entry]))
+  for (const id of requested) {
+    if (!available.has(id)) throw new Error(`LLM7 免费池里没有这个模型：${id}`)
+    const item = available.get(id)
+    if (!merged.has(id)) merged.set(id, { id: item.id, ...(item.name && item.name !== item.id ? { name: item.name } : {}) })
+  }
+  const value = {
+    displayName: LLM7_DISPLAY,
+    api: 'openai-completions',
+    baseURL: LLM7_BASE,
+    apiKeyEnv: LLM7_REF,
+    models: [...merged.values()].slice(0, 12),
+  }
+  const credentials = ctx.get('credentials')
+  if (credentials) await credentials.set(LLM7_REF, 'llm7-free-noauth')
+  await settings.mutate(descriptor.ns, [{ op: 'set', path: ['providers', LLM7_ROUTE], value }], descriptor.revision)
+  saveState(state)
+  let registered = false
+  try {
+    registered = (ctx.get('llm')?.listProviders?.() || []).some(item => item.id === LLM7_ROUTE)
+  } catch {
+    registered = false
+  }
+  return { ok: true, routeId: LLM7_ROUTE, installed: value.models.map(model => model.id), registered }
+}
+
 /* ------------------------------------------------------- anonymous health */
 
 const ANON_ROUTES = {
@@ -778,6 +872,12 @@ const ANON_ROUTES = {
     headers: {},
     timeoutMs: 60000,
   },
+  [LLM7_ROUTE]: {
+    label: 'LLM7',
+    url: `${LLM7_BASE}/chat/completions`,
+    headers: {},
+    timeoutMs: 60000,
+  },
 }
 
 const RATE_LIMIT_HINT = /sign up for free|rate.?limit|too many requests|free limit|come back later|quota/i
@@ -786,10 +886,12 @@ async function probeAnonModel(routeId, modelId) {
   const route = ANON_ROUTES[routeId]
   if (!route) return { route: routeId, id: modelId, ok: false, error: '未知的匿名路由' }
   let last = null
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
     last = await probeAnonOnce(routeId, route, modelId)
-    if (last.ok || !last.rateLimited) return last
-    await new Promise(resolve => setTimeout(resolve, 8000 * attempt))
+    if (last.ok || last.rateLimited) return last
+    // Only retry genuine transport failures: a throttled model is kept anyway,
+    // so retrying it would just make a full-pool scan slow.
+    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 3000))
   }
   return last
 }
@@ -860,20 +962,38 @@ async function probeAnonOnce(routeId, route, modelId) {
  */
 async function healthCheckAnon(ctx, state, options) {
   const prune = options?.prune !== false
+  const scope = options?.scope === 'pool' ? 'pool' : 'installed'
   const settings = ctx.get('settings')
   if (!settings) throw new Error('settings 服务不可用')
   const descriptor = providerDescriptor(settings)
   const targets = []
+  const seen = new Set()
+  const add = (routeId, id) => {
+    if (!id) return
+    const key = `${routeId}:${id}`
+    if (seen.has(key)) return
+    seen.add(key)
+    targets.push({ routeId, id })
+  }
   for (const routeId of Object.keys(ANON_ROUTES)) {
-    for (const id of anonInstalledModels(descriptor, routeId)) targets.push({ routeId, id })
+    for (const id of anonInstalledModels(descriptor, routeId)) add(routeId, id)
+  }
+  if (scope === 'pool') {
+    for (const [routeId, items] of [
+      [KILO_ROUTE, state.kilo?.items],
+      [POLLINATIONS_ROUTE, state.pollinations?.items],
+      [LLM7_ROUTE, state.llm7?.items],
+    ]) {
+      for (const item of items || []) add(routeId, item.id)
+    }
   }
   if (!targets.length) {
-    return { ok: true, checked: 0, kept: [], failed: [], removed: 0, rateLimited: 0, note: '还没有启用任何匿名免费模型' }
+    return { ok: true, scope, checked: 0, kept: [], failed: [], removed: 0, rateLimited: 0, note: '还没有启用任何匿名免费模型' }
   }
   const results = []
   for (const target of targets) {
     results.push(await probeAnonModel(target.routeId, target.id))
-    await new Promise(resolve => setTimeout(resolve, 2500))
+    await new Promise(resolve => setTimeout(resolve, 2000))
   }
   results.sort((left, right) => `${left.route}:${left.id}`.localeCompare(`${right.route}:${right.id}`))
   const rateLimited = results.filter(item => !item.ok && item.rateLimited)
@@ -897,10 +1017,12 @@ async function healthCheckAnon(ctx, state, options) {
     if (Array.isArray(state.pollinations?.items)) {
       state.pollinations.items = state.pollinations.items.filter(item => !drop.has(item.id))
     }
+    if (Array.isArray(state.llm7?.items)) state.llm7.items = state.llm7.items.filter(item => !drop.has(item.id))
     removed = failed.length
   }
   state.anonHealth = {
     at: new Date().toISOString(),
+    scope,
     checked: results.length,
     kept: results.filter(item => item.ok).length,
     rateLimited: rateLimited.length,
@@ -909,6 +1031,7 @@ async function healthCheckAnon(ctx, state, options) {
   saveState(state)
   return {
     ok: true,
+    scope,
     checked: results.length,
     kept: results.filter(item => item.ok).map(item => item.id),
     failed: failed.map(item => ({ route: item.route, id: item.id, error: item.error })),
@@ -1390,6 +1513,8 @@ function snapshot(ctx, state) {
   const kiloInstalled = installedFor(KILO_ROUTE)
   const pollinationsItems = state.pollinations?.items || []
   const pollinationsInstalled = installedFor(POLLINATIONS_ROUTE)
+  const llm7Items = state.llm7?.items || []
+  const llm7Installed = installedFor(LLM7_ROUTE)
   return {
     ok: true,
     build: PLUGIN_VERSION,
@@ -1409,6 +1534,13 @@ function snapshot(ctx, state) {
       items: pollinationsItems,
       installed: pollinationsInstalled,
       stale: pollinationsInstalled.filter(id => !pollinationsItems.some(item => item.id === id)),
+    },
+    llm7: {
+      at: state.llm7?.at || null,
+      error: state.llm7?.error || null,
+      items: llm7Items,
+      installed: llm7Installed,
+      stale: llm7Installed.filter(id => !llm7Items.some(item => item.id === id)),
     },
     anon: {
       blocked: state.anonBlocked || [],
@@ -1980,8 +2112,29 @@ export function apply(ctx, config = {}) {
       if (credentials) await credentials.unset(POLLINATIONS_REF).catch(() => {})
       return { ok: true, state: snapshot(ctx, state) }
     },
+    llm7Models: async body => {
+      const outcome = await refreshLlm7(state, body?.force !== false)
+      saveState(state)
+      return { ok: true, ...outcome, state: snapshot(ctx, state) }
+    },
+    llm7Install: async body => {
+      const result = await installLlm7(ctx, state, body)
+      return { ...result, state: snapshot(ctx, state) }
+    },
+    llm7Uninstall: async () => {
+      const settings = ctx.get('settings')
+      if (!settings) throw new Error('settings 服务不可用')
+      const descriptor = providerDescriptor(settings)
+      await settings.mutate(descriptor.ns, [{ op: 'unset', path: ['providers', LLM7_ROUTE] }], descriptor.revision)
+      const credentials = ctx.get('credentials')
+      if (credentials) await credentials.unset(LLM7_REF).catch(() => {})
+      return { ok: true, state: snapshot(ctx, state) }
+    },
     anonHealth: async body => {
-      const result = await healthCheckAnon(ctx, state, { prune: body?.prune !== false })
+      const result = await healthCheckAnon(ctx, state, {
+        prune: body?.prune !== false,
+        scope: body?.scope === 'pool' ? 'pool' : 'installed',
+      })
       return { ...result, state: snapshot(ctx, state) }
     },
     anonUnblock: async body => {
@@ -2104,6 +2257,10 @@ export function apply(ctx, config = {}) {
             json(res, 200, await handlers.pollinationsModels({ force: true }))
             return
           }
+          if (req.method === 'GET' && route === '/llm7/models') {
+            json(res, 200, await handlers.llm7Models({ force: true }))
+            return
+          }
           if (req.method !== 'POST') {
             json(res, 405, { ok: false, error: 'method not allowed' })
             return
@@ -2126,6 +2283,9 @@ export function apply(ctx, config = {}) {
           if (route === '/pollinations/models') return json(res, 200, await handlers.pollinationsModels(body))
           if (route === '/pollinations/install') return json(res, 200, await handlers.pollinationsInstall(body))
           if (route === '/pollinations/uninstall') return json(res, 200, await handlers.pollinationsUninstall(body))
+          if (route === '/llm7/models') return json(res, 200, await handlers.llm7Models(body))
+          if (route === '/llm7/install') return json(res, 200, await handlers.llm7Install(body))
+          if (route === '/llm7/uninstall') return json(res, 200, await handlers.llm7Uninstall(body))
           if (route === '/anon/health') return json(res, 200, await handlers.anonHealth(body))
           if (route === '/anon/unblock') return json(res, 200, await handlers.anonUnblock(body))
           if (route === '/feeds') return json(res, 200, await handlers.feed(body))
@@ -2152,7 +2312,7 @@ export function apply(ctx, config = {}) {
       Promise.resolve(proxyReady)
         .then(port => {
           console.log(`[${NAME}] local machine room ready on 127.0.0.1:${port || '?'}`)
-          return Promise.allSettled([refreshRadar(state), refreshKilo(state, false), refreshPollinations(state, false)])
+          return Promise.allSettled([refreshRadar(state), refreshKilo(state, false), refreshPollinations(state, false), refreshLlm7(state, false)])
         })
         .then(() => saveState(state))
         .catch(() => {})
