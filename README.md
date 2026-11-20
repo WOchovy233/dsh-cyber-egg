@@ -63,7 +63,7 @@ dsh plugin --profile web add github:WOchovy233/dsh-cyber-egg
 
 ## 更新机制
 
-面板读取仓库根目录的 [`update.json`](./update.json)（带签名文件 `update.json.sig`）：
+面板读取仓库根目录的 [`update.json`](./update.json)，签名内嵌在清单里（另保留 `update.json.sig` 供旧版读取）：
 
 1. 检查更新：比较版本号，有新版本时按钮变为 **「更新到 vX」**；
 2. 点击后下载安装包、校验签名与 sha256，再交给运行环境安装；
