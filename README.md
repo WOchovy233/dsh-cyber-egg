@@ -63,14 +63,13 @@ dsh plugin --profile web add github:WOchovy233/dsh-cyber-egg
 
 ## 更新机制
 
-面板读取仓库根目录的 [`update.json`](./update.json)：
+面板读取仓库根目录的 [`update.json`](./update.json)（带签名文件 `update.json.sig`）：
 
-1. 依次尝试 GitHub Release、`raw.githubusercontent.com`、jsDelivr 上的 `update.json`；
-2. 比较版本号，有新版本时按钮变为 **「更新到 vX」**；
-3. 点击后下载 tarball、校验 sha256，再调用 DSH 的 `pluginManager.installBundle()` 安装；
-4. 提示「已更新，刷新页面」或「重启 DSH 后生效」。
+1. 检查更新：比较版本号，有新版本时按钮变为 **「更新到 vX」**；
+2. 点击后下载安装包、校验签名与 sha256，再交给运行环境安装；
+3. 提示「已更新，刷新页面」或「重启 DSH 后生效」。
 
-发布新版的步骤：改 `package.json` 版本 → 打包 → 更新 `update.json`（版本、下载地址、sha256）→ 推送并打 tag → 把 tgz 以 **固定文件名 `cyber-egg-latest.tgz`** 上传到新 Release。这样上面的直链和二维码永远有效。
+`cyber-egg-latest.tgz` 是永久文件名，所以上面的直链和二维码不会失效。
 
 ---
 
@@ -89,11 +88,12 @@ dsh plugin --profile web add github:WOchovy233/dsh-cyber-egg
 
 ## 安全与限制
 
-- API Key 写入本机凭据库（`EGG_*_API_KEY`），中转站口令写入 `CYBER_EGG_RELAY_*`，都不进 `cordis.patch.yml`。
-- 中转站、雷达、订阅与更新状态保存在 `<DSH_HOME>/cyber-egg/<profile>.json`；更新包缓存在 `<DSH_HOME>/cyber-egg/packages/`。
-- Kilo 匿名通道在**本机随机机房端口**做透明转发：开机先把机房写定，再去拉模型列表，路由会自动改成实际绑定的端口。DSH 适配器强制带鉴权头，而该网关要求不带；转发只改这一处，不记录对话。免费池的提示词可能被上游记录，勿发敏感内容。
+- API Key 与中转站口令只保存在本机凭据库，不写入插件配置，也不随插件包分发。
+- 中转站、雷达、订阅与更新状态只保存在本机；更新包缓存在本机。
+- 匿名免费通道经本机随机机房端口转发（每台设备自己的端口，被占用自动顺延，路由跟随实际端口），转发只发生在你自己这台机器内部，不记录对话内容。免费池的提示词可能被上游记录，勿发敏感内容。
+- 自更新清单带数字签名，版本号、校验值与下载地址都在签名范围内；镜像被篡改只会导致升级失败。验签失败时请到 Release 页面手动下载安装包。
 - 需要人类验证 / 图形验证码 / 微信小程序登录的站点无法自动签到。
-- 自更新依赖 `pluginManager` 服务；DSH Go 的本机引擎提供该服务，远程主机模式只支持插件开关。
+- 自更新依赖运行环境的插件管理服务；DSH Go 的本机引擎提供该服务，远程主机模式只支持插件开关。
 
 ## License
 
