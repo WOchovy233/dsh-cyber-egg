@@ -1,10 +1,10 @@
 {
-  "version": "1.4.1",
-  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.1/cyber-egg-1.4.1.tgz",
+  "version": "1.4.2",
+  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.2/cyber-egg-1.4.2.tgz",
   "tarballMirrors": [
-    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.1/cyber-egg-1.4.1.tgz",
-    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.1/cyber-egg-1.4.1.tgz"
+    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.2/cyber-egg-1.4.2.tgz",
+    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.2/cyber-egg-1.4.2.tgz"
   ],
-  "sha256": "8557258D02FC69933C6D42221CCA3DAA6302B3791D25E0143772E10BEEF688C7",
-  "notes": "1.4.1：修复更新包被存到临时目录、导致 profile 依赖悬空的问题（现在保存到 <DSH_HOME>/cyber-egg/packages/）；面板新增「检查更新 / 更新到 vX」按钮。"
+  "sha256": "560DA70D047308EFF7E796FB07D5A6170EE485BAD4AB27272301FAD4891C75DF",
+  "notes": "1.4.2：补齐面板里剩余的中文硬编码（徽标、地区、占位提示、保存提示等 13 处），中英切换更完整；修正插件说明里的版本示例与免费池数量漂移；安卓安装示例改用永久别名包 cyber-egg-latest.tgz；发布脚本改为自动读取 package.json 版本，同版本重发可替换 Release 资产。"
 }
