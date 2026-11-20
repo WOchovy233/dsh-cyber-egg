@@ -1,0 +1,4 @@
+- insert:
+    - id: cyber-egg
+      name: '@local/cyber-egg'
+      config: {}
