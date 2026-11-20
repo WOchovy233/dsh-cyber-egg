@@ -1,100 +1,213 @@
-# 赛博鸡蛋 · Cyber eggs
+# Cyber eggs
 
-DeepSeek Harness 插件：每天捡免费 token，一键装进模型列表，中转站自动签到，面板内一键更新。
+Collect free tokens daily and put them to work inside DeepSeek Harness. A single egg
+button in the left sidebar opens a panel with three tabs.
 
-左侧栏「赛博鸡蛋」入口，四个标签页：**鸡蛋市场 / 匿名免费 / 我的中转站 / 自动领取**。
+## Market — tiered free-token sources
 
-匿名免费有三个免注册池（Kilo 公共网关 + Pollinations + LLM7），点「全池体检」会逐个发「你好」，只保留能聊的、自动移除连不上的（可一键恢复）；点检查更新 / 更新成功后也会自动体检一次。桌面端和安卓 DSH Go 装同一个包。
+The market is ordered in three tiers:
 
----
+1. **Most used 🔥** — the three the community reaches for first: 硅基流动 (SiliconFlow),
+   智谱 GLM, OpenRouter.
+2. **Editor picks 荐** — Groq, Gemini AI Studio, 魔搭 ModelScope.
+3. **More eggs** — the rest of the curated set (Cerebras, 百炼, 火山方舟, Mistral,
+   Together, 讯飞星火, GitHub Models), followed by sources that arrived through a feed.
 
-## 一键下载（永久链接）
+Each card shows the rough daily allowance (`daily`), whether you can register from
+mainland China (`access`: direct / proxy / foreign card), a one-line pitch, and a
+longer note about which models are free, rate limits, and setup gotchas. The official
+source list and all of those descriptions are delivered by the signed `catalog.json`
+on the `main` branch, so copy and quota changes do not require a plugin release. The
+bundled `catalog.js` is a fail-safe fallback when the remote copy cannot be fetched.
 
-| 扫码直接下载最新包 | 扫码打开版本页 | 扫码打开仓库 |
-|:---:|:---:|:---:|
-| <img src="qr/download.png" width="180" alt="下载最新 cyber-egg-latest.tgz"> | <img src="qr/releases.png" width="180" alt="全部版本"> | <img src="qr/repo.png" width="180" alt="仓库主页"> |
-| `cyber-egg-latest.tgz` | 历史版本与更新说明 | 源码 |
+**Install** takes that site's API key, asks the endpoint for its own model list, stores
+the key in the local credential store, and writes a model route named
+`<site> · Cyber eggs` into the `llm-pi-ai` settings section. The route then appears in
+the composer's model picker. Model ids are never hard-coded.
 
-**点一下就下载（这条链接永远指向最新版，不需要换）：**
+### Global free-model radar
 
+**Refresh eggs** is the only trigger for upstream data. It fetches the signed official
+catalogue and subscribed feeds, calls OpenRouter's public model API, refreshes all three
+anonymous pools, and re-discovers models for every installed egg route. The radar keeps
+every model whose input and output prices are both zero, shows a `newly listed` badge
+for models absent from the previous snapshot, and lists vendor/context window. Opening
+the panel only reads cached local state; it never starts a background refresh.
+
+When OpenRouter is unreachable (typical on mainland mobile networks), the radar falls
+back to the Kilo free pool, marks itself `Kilo 数据源`, and shows the network reason
+(e.g. `网络不可达（域名解析失败）`) instead of a bare `fetch failed`. The previous snapshot
+is kept when neither source answers.
+
+### Custom feeds
+
+Any JSON URL can extend the catalogue. When you press **Refresh eggs**, the plugin
+fetches each feed and merges its entries into the market with a `new` mark for entries
+seen for the first time:
+
+```json
+{
+  "sources": [
+    {
+      "id": "my-relay",
+      "name": "My Relay",
+      "baseURL": "https://relay.example.com/v1",
+      "api": "openai-completions",
+      "daily": "约 500 次/天",
+      "access": "cn-direct",
+      "signupUrl": "https://relay.example.com/register"
+    }
+  ]
+}
 ```
-https://github.com/WOchovy233/dsh-cyber-egg/releases/latest/download/cyber-egg-latest.tgz
-```
 
-- 版本页：https://github.com/WOchovy233/dsh-cyber-egg/releases/latest
-- 校验：`sha256` 以对应 Release 说明为准（每次发版都会更新）
+`api` accepts `openai-completions`, `openai-responses`, `anthropic-messages` and
+`google-generative-ai`; `access` accepts `cn-direct`, `cn-vpn`, `cn-card`. Feed entries
+are installable exactly like built-in sources.
 
----
+## No-key — anonymous free models
 
-## 安装方式
+A fourth tab lists the free pool of Kilo's public gateway (`https://ai-gateway.kilo.ai/api/v1`,
+rows with `isFree: true`). **Enable** puts one model into the model picker, **Enable all**
+adds the whole pool as the provider route `kilo-free · Cyber eggs`; no sign-up, no key,
+no account. **Test inference** sends one real request through DSH's own model call path
+and reports the answer.
 
-### 方式一：直连 URL 安装（最省事，永远装最新版）
+Why a loopback hop: the adapter in DSH always attaches an auth header, so the plugin runs
+a transparent forwarder on a **random local port of its own** — every device is its own
+"machine room": the port is picked at random, remembered per install, and moved along when
+the chosen one is taken; the provider route is rewritten to whichever port actually bound.
+The forwarder adjusts only that header. It adds no account pool, stores no conversation,
+and forwards only `/v1/models`, `/v1/chat/completions` and `/v1/completions` to the fixed
+Kilo host. The port number is written into the route; on startup the plugin re-points an
+existing route if the port had to move.
 
-手机 DSH Go 终端，或电脑终端，一行搞定：
+The free pool's own model cards say prompts **may be logged** by the upstream provider —
+treat this lane as throwaway work, never send secrets or private data.
 
-```bash
-dsh plugin --profile web add https://github.com/WOchovy233/dsh-cyber-egg/releases/latest/download/cyber-egg-latest.tgz
-```
+### Second no-key pool: Pollinations
 
-也可以先扫码下载到手机，再装本地文件：
+The same tab lists a second anonymous pool: Pollinations' public endpoint
+(`https://text.pollinations.ai/openai`, the `anonymous` tier of `/models`, currently one
+model). It needs no key and no sign-up; a dummy token is accepted, so it plugs in as the
+provider route `pollinations-free · Cyber eggs` without a proxy. Its free tier is
+rate-limited to **one reply per IP every 45 seconds** — good for the occasional request,
+not for a long agent session.
 
-```bash
-dsh plugin --profile web add file:/sdcard/Download/cyber-egg-latest.tgz
-```
+### Third no-key pool: LLM7
 
-### 方式二：直接装 Git 仓库
+The tab also lists LLM7's public pool (`https://api.llm7.io/v1`, every non-`pro` model from
+`/models`, currently four). No key and no sign-up; a dummy token is accepted, so it becomes
+the provider route `llm7-free · Cyber eggs` with no proxy. Its free allowance is small and
+counted per model, so `429` answers are common — treat it as a last resort.
 
-```bash
-dsh plugin --profile web add github:WOchovy233/dsh-cyber-egg
-```
+### Health check — keep only models that actually answer
 
-仓库地址：https://github.com/WOchovy233/dsh-cyber-egg
+**Scan all free models** sends `你好` to every enabled anonymous model plus every model in
+the three pools, one at a time, and reports what came back. Models that cannot answer
+(model gone, repeated timeouts, empty replies) are removed from the provider config and
+remembered in a block list so a later pool refresh does not bring them back; a **Restore**
+button undoes that.
 
-### 方式三：DSH Go（安卓）
+A `429`/`402`/quota answer means the free pool is throttling this IP, not that the model is
+dead: those are retried a few times and then **kept** and reported separately. This matters
+because probing several models concurrently is exactly what triggers Kilo's
+"sign up for free" throttle — so probes are strictly sequential with a 2.5 s gap.
 
-1. 先装 App：[DSH Go Releases](https://github.com/ccch1mneyyy/dsh-Go/releases)（第三方客户端，Android 8+，常用手机选 arm64），首次启动选「本机安装运行环境」；
-2. 用方式一或方式二把插件装进手机里的 DSH；
-3. 重启引擎 → 设置 → 插件 → 启用「赛博鸡蛋」；
-4. 回到对话页点左侧栏鸡蛋图标。
+The same health pass runs automatically after a plugin update (enabled models only), so an
+update also prunes whatever stopped working since the last release.
 
-装好之后不再需要命令行：面板右上角 **「检查更新 → 更新到 vX」** 一键升级。
+OpenCode's free lane (the other anonymous channel in `dsh-our-free-model`) is not
+available here: it requires the local `opencode` CLI running on Bun, so there is no plain
+HTTP endpoint to point at.
 
----
+## My relays — daily check-in
 
-## 更新机制
+Relay sites built on New API / One API expose a daily check-in endpoint. Add the site
+URL and access token, press **Test** (it can reuse the saved token), then **Claim now**.
+Protocol `newapi` calls `POST /api/user/checkin` with the bearer token and an optional
+`New-Api-User` header; protocol `custom` lets you set method, path, headers, body and a
+success keyword for any other site.
 
-面板读取仓库根目录的 [`update.json`](./update.json)，签名内嵌在清单里（另保留 `update.json.sig` 供旧版读取）：
+## Auto claim
 
-1. 检查更新：比较版本号，有新版本时按钮变为 **「更新到 vX」**；
-2. 点击后下载安装包、校验签名与 sha256，再交给运行环境安装；
-3. 提示「已更新，刷新页面」或「重启 DSH 后生效」。
+One daily time (default 09:00) checks in to every enabled relay while DSH is running.
+Adding your first relay enables this automatically unless you already saved a time.
+**Catch up** runs a missed same-day check-in shortly after DSH starts. Every attempt is
+recorded under **History** with its result.
 
-`cyber-egg-latest.tgz` 是永久文件名，所以上面的直链和二维码不会失效。
+## Android / DSH Go
 
----
+This project ships a JavaScript bundle, not an APK: it runs inside DeepSeek Harness,
+including the DSH engine bundled in the community Android client **DSH Go**
+(`ccch1mneyyy/dsh-go`, third-party, AGPL-3.0, Android 8+, arm64 APK from its Releases).
+No plugin-specific Android build exists or is needed.
 
-## 目录
+Use DSH Go's **本机引擎** mode (the engine runs on the phone). In **远程主机** mode the app
+only offers switch management for plugins, so the panel is not rendered there.
 
-| 文件 | 说明 |
-|---|---|
-| `index.js` | Host 半身：HTTP API、市场安装、中转站签到、定时器、Kilo 转发、自更新 |
-| `client.js` | 浏览器半身：左侧栏入口 + 面板 UI |
-| `catalog.js` | 免费 token 来源数据（分级、额度、注册条件） |
-| `update.json` | 自更新清单（版本 / 下载地址 / sha256） |
-| `qr/*.png` | 下载二维码（最新包 / 版本页 / 仓库） |
-| `cyber-egg-*.tgz` | 可直接安装的插件包 |
-| `cordis.patch.yml` | bundle patch |
-| `locale/*.json` | 插件标题与描述（中英） |
+1. Get `cyber-egg-latest.tgz` (the permanent alias of the newest release) onto the phone,
+   e.g. `Download/cyber-egg-latest.tgz`.
+2. In the app's terminal run:
+   `dsh plugin --profile web add file:/sdcard/Download/cyber-egg-latest.tgz`
+3. Restart the engine, then enable **赛博鸡蛋** under 设置 → 插件.
+4. Open the egg icon in the left sidebar. The Kilo lane forwards through the phone's own
+   random local port (see above), so no PC is involved and no two devices share a port.
 
-## 安全与限制
+The Host half needs the profile services `settings`, `credentials`, `llm` and
+`webServer`, plus the `llm-pi-ai` provider adapter to install models. If the app's
+bundled DSH lacks `llm-pi-ai`, the market tab still lists sources but an install reports
+that no provider configuration is available.
 
-- API Key 与中转站口令只保存在本机凭据库，不写入插件配置，也不随插件包分发。
-- 中转站、雷达、订阅与更新状态只保存在本机；更新包缓存在本机。
-- 匿名免费通道经本机随机机房端口转发（每台设备自己的端口，被占用自动顺延，路由跟随实际端口），转发只发生在你自己这台机器内部，不记录对话内容。免费池的提示词可能被上游记录，勿发敏感内容。
-- 自更新清单带数字签名，版本号、校验值与下载地址都在签名范围内；镜像被篡改只会导致升级失败。验签失败时请到 Release 页面手动下载安装包。
-- 需要人类验证 / 图形验证码 / 微信小程序登录的站点无法自动签到。
-- 自更新依赖运行环境的插件管理服务；DSH Go 的本机引擎提供该服务，远程主机模式只支持插件开关。
+## Self-update (signed)
 
-## License
+The panel's **Check for updates / Update to vX** button reads `update.json` from the latest
+Release (then the raw branch, then jsDelivr as the last resort), and verifies the
+**signature embedded in the manifest** — an Ed25519 signature made by the release key and
+checked with a public key pinned inside this plugin. Version, tarball URL and `sha256` all
+sit inside the signed payload, so a poisoned mirror can only make the update *fail*: it
+cannot ship modified code, because it cannot forge the signature. Opening the panel does
+not check for updates; only clicking that button contacts the release API.
 
-MIT
+The signature lives in the same file as the data it covers. An earlier release kept it in
+a separate `update.json.sig`, and jsDelivr happily served a stale manifest next to a fresh
+signature (two files, two independent caches), which surfaced as a bogus "signature
+mismatch". Failures now retry the same URL once with a cache-busting query, and the
+detached `.sig` is still published for clients from 1.4.7–1.5.0 that only know that format.
+
+Fail-closed rules: a missing signature, a signature that does not verify, a malformed
+manifest, a non-https tarball URL or a `sha256` mismatch aborts the install before any
+package is written. The panel then says the manifest failed verification and points at the
+Release page for a manual download.
+
+The private key is not in this repository (publishing would otherwise let anyone sign a
+release). It lives outside the repo and is used by the release script; the matching public
+key is the `UPDATE_PUBLIC_KEY` constant in `index.js`, and `scripts/verify-manifest.mjs`
+re-checks release artifacts in CI.
+
+## Storage and secrets
+- API keys are credential refs such as `EGG_OPENROUTER_API_KEY`; relay tokens are
+  `CYBER_EGG_RELAY_<id>`. Both live in the local credential store, never in
+  `cordis.patch.yml`.
+- Relay definitions, install records, radar snapshots, feeds, the cached official
+  catalogue, today's claim state and the last 120 attempts live in
+  `<DSH_HOME>/cyber-egg/<profile>.json`.
+- The HTTP API is bound to the panel and answered only for loopback requests.
+
+## Limitations
+
+- Sites that require a CAPTCHA, human verification, or a WeChat mini-program login
+  cannot be automated here. Only HTTP endpoints and custom request recipes are supported.
+- Daily figures and China-registration conditions are approximate; the provider's own
+  page is authoritative.
+- Automatic claims need DSH to be running at the configured time; a day when DSH never
+  started is not replayed.
+- The radar depends on OpenRouter's public API; when the network cannot reach it the panel
+  shows the fetch error and keeps the previous snapshot.
+- Model discovery depends on the provider serving a standard `GET {baseURL}/models`;
+  otherwise install with explicit model ids.
+
+## Configuration
+
+The row in `cordis.patch.yml` accepts `hour`, `minute` and `claims: { enabled, catchUp }`
+as initial values. The panel's **Auto claim** tab owns the live values afterwards.
