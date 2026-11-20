@@ -1,10 +1,10 @@
 {
-  "version": "1.4.4",
-  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.4/cyber-egg-1.4.4.tgz",
+  "version": "1.4.6",
+  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.6/cyber-egg-1.4.6.tgz",
   "tarballMirrors": [
-    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.4/cyber-egg-1.4.4.tgz",
-    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.4/cyber-egg-1.4.4.tgz"
+    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.6/cyber-egg-1.4.6.tgz",
+    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.6/cyber-egg-1.4.6.tgz"
   ],
-  "sha256": "D8690CF4F62E78C221424E23CC9EB5DEFBA04B5C246181465116309DF0E21FFC",
-  "notes": "1.4.4：修复更新按钮的两个 bug——本地版本号读不到时被当成 0.0.0，导致已经是新版还一直提示「更新到 vX」；重复安装同一个版本的包时不再报「更新失败」，改为提示已是最新。桌面端与安卓 DSH Go 同步更新。"
+  "sha256": "BAC7A51C17C5AB0640B4687435EF8384015E239FE0295579FCAB3FC9825BAF1D",
+  "notes": "1.4.6：随机本地机房从 200 个端口扩到 2000 个（18878–20877）；启动顺序改为「先自动填写机房（绑定并落盘）→ 再拉取模型列表」，机房被占用时自动换下一个并改写路由，面板显示当前机房端口。桌面端与安卓 DSH Go 同一安装包。"
 }
