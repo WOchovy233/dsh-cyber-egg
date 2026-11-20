@@ -11,7 +11,7 @@ const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
 // Keep in sync with package.json; the update check falls back to this when the
 // loader gives us an entry URL that does not sit next to package.json.
-const PLUGIN_VERSION = '1.4.7'
+const PLUGIN_VERSION = '1.4.8'
 
 /**
  * Release signing key (Ed25519, public half). The private half lives outside the
@@ -420,7 +420,7 @@ const KILO_PROXY_PATHS = new Set(['/v1/models', '/v1/chat/completions', '/v1/com
  * plain openai-completions provider with full streaming and tool-call support.
  *
  * Every device is its own "local machine room": the listen port is picked at
- * random inside [18878, 19078) and remembered per install, so two phones/PCs do
+ * random inside the configured range and remembered per install, so two phones/PCs do
  * not fight over the same number. A busy port falls through to the next one and
  * the provider route is rewritten to the port that actually bound.
  */
