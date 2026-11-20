@@ -11,7 +11,7 @@ const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
 // Keep in sync with package.json; the update check falls back to this when the
 // loader gives us an entry URL that does not sit next to package.json.
-const PLUGIN_VERSION = '1.5.0'
+const PLUGIN_VERSION = '1.5.1'
 
 /**
  * Release signing key (Ed25519, public half). The private half lives outside the
@@ -1582,12 +1582,18 @@ function updateChannel(config, state) {
 
 function updateUrls(channel) {
   const base = `${channel.owner}/${channel.repo}`
+  // Release asset first, then the raw endpoints; jsDelivr caches per file for hours,
+  // so it is the last resort instead of a primary mirror.
   return [
     `https://github.com/${base}/releases/latest/download/update.json`,
     `https://raw.githubusercontent.com/${base}/${channel.branch}/update.json`,
-    `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/update.json`,
     `https://github.com/${base}/raw/${channel.branch}/update.json`,
+    `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/update.json`,
   ]
+}
+
+function withCacheBust(url) {
+  return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`
 }
 
 function localVersion() {
@@ -1613,34 +1619,26 @@ function compareVersions(left, right) {
 }
 
 /**
- * The published update.json must come with update.json.sig: an Ed25519 signature
- * over the exact manifest bytes, made by the release key. A poisoned mirror
- * (jsDelivr / raw / release asset) can then only make the update fail, never
- * install code, because it cannot forge a signature.
+ * The manifest carries its own Ed25519 signature, so the JSON and its proof travel as
+ * one file and two independently cached mirrors can never be paired up wrongly
+ * (that is exactly how 1.5.0 broke: jsDelivr served a 1.4.6 manifest next to a 1.5.0
+ * detached signature). The signature covers this canonical payload, not the raw file
+ * bytes, so re-indenting or adding fields does not invalidate it.
  */
-function verifyManifest(text, signature) {
-  const manifest = String(text || '')
-  const sig = String(signature || '').trim()
-  if (!manifest.trim()) throw new Error('更新清单为空')
-  if (!sig) throw new Error('更新清单缺少签名（update.json.sig）')
-  let verified = false
-  try {
-    verified = crypto.verify(
-      null,
-      Buffer.from(manifest, 'utf8'),
-      crypto.createPublicKey(UPDATE_PUBLIC_KEY),
-      Buffer.from(sig, 'base64'),
-    )
-  } catch (error) {
-    throw new Error(`更新清单签名校验失败：${error?.message || error}`)
-  }
-  if (!verified) throw new Error('更新清单签名校验失败（可能被篡改或镜像投毒）')
-  let doc = null
-  try {
-    doc = JSON.parse(manifest)
-  } catch {
-    throw new Error('更新清单不是合法 JSON')
-  }
+function manifestPayload(doc) {
+  return Buffer.from(
+    JSON.stringify({
+      version: String(doc?.version || ''),
+      tarball: String(doc?.tarball || ''),
+      tarballMirrors: Array.isArray(doc?.tarballMirrors) ? doc.tarballMirrors.map(String) : [],
+      sha256: String(doc?.sha256 || ''),
+      notes: String(doc?.notes || ''),
+    }),
+    'utf8',
+  )
+}
+
+function manifestFields(doc) {
   const version = String(doc?.version || '').trim()
   if (!version) throw new Error('update.json 缺少 version 字段')
   const tarball = String(doc?.tarball || '').trim()
@@ -1654,6 +1652,57 @@ function verifyManifest(text, signature) {
     tarballMirrors: Array.isArray(doc?.tarballMirrors) ? doc.tarballMirrors.map(String).filter(Boolean) : [],
     notes: String(doc?.notes || '').slice(0, 500),
   }
+}
+
+function verifyEmbeddedManifest(doc) {
+  const signature = String(doc?.signature || '').trim()
+  if (!signature) return null
+  let verified = false
+  try {
+    verified = crypto.verify(null, manifestPayload(doc), crypto.createPublicKey(UPDATE_PUBLIC_KEY), Buffer.from(signature, 'base64'))
+  } catch (error) {
+    throw new Error(`更新清单签名校验失败：${error?.message || error}`)
+  }
+  if (!verified) throw new Error('更新清单签名校验失败（可能被篡改或镜像投毒）')
+  return manifestFields(doc)
+}
+
+function verifyDetachedManifest(text, signature) {
+  const manifest = String(text || '')
+  const sig = String(signature || '').trim()
+  if (!manifest.trim()) throw new Error('更新清单为空')
+  if (!sig) throw new Error('更新清单缺少签名（update.json.sig）')
+  let verified = false
+  try {
+    verified = crypto.verify(null, Buffer.from(manifest, 'utf8'), crypto.createPublicKey(UPDATE_PUBLIC_KEY), Buffer.from(sig, 'base64'))
+  } catch (error) {
+    throw new Error(`更新清单签名校验失败：${error?.message || error}`)
+  }
+  if (!verified) throw new Error('更新清单签名校验失败（可能被篡改或镜像投毒）')
+  let doc = null
+  try {
+    doc = JSON.parse(manifest)
+  } catch {
+    throw new Error('更新清单不是合法 JSON')
+  }
+  return manifestFields(doc)
+}
+
+/** Accepts either an embedded signature or the legacy detached one (1.4.7–1.5.0). */
+function verifyManifest(text, signature) {
+  const manifest = String(text || '')
+  if (!manifest.trim()) throw new Error('更新清单为空')
+  let doc = null
+  try {
+    doc = JSON.parse(manifest)
+  } catch {
+    if (signature) return verifyDetachedManifest(manifest, signature)
+    throw new Error('更新清单不是合法 JSON')
+  }
+  const embedded = verifyEmbeddedManifest(doc)
+  if (embedded) return embedded
+  if (signature) return verifyDetachedManifest(manifest, signature)
+  throw new Error('更新清单缺少签名')
 }
 
 function describeUpdateError(error, timeoutMs) {
@@ -1676,30 +1725,47 @@ async function checkUpdate(state, config) {
   const current = localVersion()
   const attempts = []
   for (const url of updateUrls(channel)) {
-    try {
-      const text = await getText(url, 15000)
-      let signature = ''
+    for (let round = 0; round < 2; round += 1) {
+      const target = round === 0 ? url : withCacheBust(url)
+      const sigUrl = round === 0 ? `${url}.sig` : withCacheBust(`${url}.sig`)
       try {
-        signature = await getText(`${url}.sig`, 15000)
+        const text = await getText(target, 15000)
+        let doc = null
+        try {
+          doc = JSON.parse(text)
+        } catch {
+          doc = null
+        }
+        if (!doc) throw new Error('更新清单不是合法 JSON')
+        let fields = verifyEmbeddedManifest(doc)
+        const embedded = Boolean(fields)
+        if (!fields) {
+          let sigText = ''
+          try {
+            sigText = await getText(sigUrl, 15000)
+          } catch (error) {
+            throw new Error(`更新清单缺少签名（update.json.sig 不可用：${String(error?.message || error)}）`)
+          }
+          fields = verifyDetachedManifest(text, sigText)
+        }
+        return {
+          ok: true,
+          current,
+          latest: fields.version,
+          newer: compareVersions(fields.version, current) > 0,
+          tarball: fields.tarball,
+          tarballMirrors: fields.tarballMirrors,
+          sha256: fields.sha256,
+          notes: fields.notes,
+          source: url,
+          channel,
+          signed: true,
+          embedded,
+          cacheBusted: round > 0,
+        }
       } catch (error) {
-        throw new Error(`更新清单缺少签名（update.json.sig 不可用：${String(error?.message || error)}）`)
+        attempts.push({ url, cacheBusted: round > 0, error: describeUpdateError(error, 15000) })
       }
-      const doc = verifyManifest(text, signature)
-      return {
-        ok: true,
-        current,
-        latest: doc.version,
-        newer: compareVersions(doc.version, current) > 0,
-        tarball: doc.tarball,
-        tarballMirrors: doc.tarballMirrors,
-        sha256: doc.sha256,
-        notes: doc.notes,
-        source: url,
-        channel,
-        signed: true,
-      }
-    } catch (error) {
-      attempts.push({ url, error: describeUpdateError(error, 15000) })
     }
   }
   const signaturesSeen = attempts.some(item => item.error.includes('签名'))
@@ -1755,9 +1821,10 @@ async function installUpdate(ctx, state, body, config) {
   let mirrors = []
   if (body?.url) {
     // Only a signed manifest may name its own tarball: without this check the local
-    // API could be asked to install an arbitrary package.
-    if (!body?.manifest || !body?.signature) throw new Error('拒绝安装：未经签名的更新清单')
-    const doc = verifyManifest(String(body.manifest), String(body.signature))
+    // API could be asked to install an arbitrary package. The signature may be
+    // embedded in the manifest or supplied separately (legacy format).
+    if (!body?.manifest) throw new Error('拒绝安装：未经签名的更新清单')
+    const doc = verifyManifest(String(body.manifest), body?.signature ? String(body.signature) : '')
     url = doc.tarball
     sha256 = doc.sha256
     latest = doc.version
