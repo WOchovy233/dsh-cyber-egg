@@ -1,11 +1,11 @@
 {
-  "version": "1.5.1",
-  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.5.1/cyber-egg-1.5.1.tgz",
+  "version": "1.5.5",
+  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.5.5/cyber-egg-1.5.5.tgz",
   "tarballMirrors": [
-    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.5.1/cyber-egg-1.5.1.tgz",
-    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.5.1/cyber-egg-1.5.1.tgz"
+    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.5.5/cyber-egg-1.5.5.tgz",
+    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.5.5/cyber-egg-1.5.5.tgz"
   ],
-  "sha256": "FEDD12BD530E11EDC963F2CB5305DA11EF58F390BFE56FFB40884B55874439D0",
-  "notes": "1.5.1：修复更新验签在镜像缓存错位时误报「签名不对」的问题——签名改为内嵌在 update.json 里（单文件），不再依赖和清单分开缓存的 .sig；验签失败会对同一地址加时间戳穿透缓存重试一次；jsDelivr 从主源降为最后兜底。仍保留 .sig 供 1.4.7–1.5.0 老客户端使用。桌面端与安卓 DSH Go 同一安装包。",
-  "signature": "B6ZZr5xtZE3ccxddUzZFm367ndDaRsO2qyRLIYmVRpxGAGGRVvgfbuYrSoGTXJiTjyKJObonelSQUwv/NZAGDA=="
+  "sha256": "F875B43CBB82B0A25BCC1B93CCB970E6C5EB7ADCF647C61726537C0CB6BAB1A5",
+  "notes": "1.5.5：官方鸡蛋源清单改为远程热更新（Ed25519 内嵌签名，失败自动回退到缓存/内置清单），额度、注册说明、简介等文案随清单实时下发；「刷新鸡蛋」现在会重新发现所有已安装来源的模型列表并改写路由，自动移除已下架模型，发现失败则保留旧路由；打开面板不再自动拉取雷达、匿名池或检查更新，只有点击「刷新鸡蛋」或「检查更新」才会访问上游。桌面端与安卓 DSH Go 共用同一安装包。",
+  "signature": "EIaCICz2x2BpPNKYxDDYbEtRTZsVZWrneKrtDq50jaXwGN2adQMh58F/9wsCoqHvjS8BruR+awd6rWILlMXeAg=="
 }
