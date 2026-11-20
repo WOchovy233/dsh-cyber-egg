@@ -1,10 +1,10 @@
 {
-  "version": "1.4.8",
-  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.8/cyber-egg-1.4.8.tgz",
+  "version": "1.5.0",
+  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.5.0/cyber-egg-1.5.0.tgz",
   "tarballMirrors": [
-    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.8/cyber-egg-1.4.8.tgz",
-    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.8/cyber-egg-1.4.8.tgz"
+    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.5.0/cyber-egg-1.5.0.tgz",
+    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.5.0/cyber-egg-1.5.0.tgz"
   ],
-  "sha256": "5EB6D0A4CFB928893439A3C19D717862796A8E4EEED7659809E920B209B1A806",
-  "notes": "1.4.8：匿名免费的说明精简为「由本插件在本机随机机房端口做一次纯转发」，不再展示端口数字与内部实现细节；GitHub 页面与插件描述同步精简。桌面端与安卓 DSH Go 同一安装包。"
+  "sha256": "C11158F9F03F6AA977574C9B2542649AA32007365D870F9C5CFCCC5F576605D8",
+  "notes": "1.5.0：匿名免费新增 LLM7 免注册池（4 个模型，免 Key，免费额度少、经常 429）；「体检」升级为全池体检，会把三个池里连不上的模型一并清掉并记住（可一键恢复），探测改为「限流即保留、不重复重试」，全池体检从约 7 分钟降到约 1.5 分钟；重新全量扫描 Kilo 池，13/14 可聊，liquid/lfm 已失效会被清理。桌面端与安卓 DSH Go 同一安装包。"
 }
