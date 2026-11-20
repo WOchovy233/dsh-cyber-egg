@@ -1,0 +1,10 @@
+{
+  "version": "1.4.0",
+  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.0/cyber-egg-1.4.0.tgz",
+  "tarballMirrors": [
+    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.0/cyber-egg-1.4.0.tgz",
+    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.0/cyber-egg-1.4.0.tgz"
+  ],
+  "sha256": "B91F636E15D34344F742725F7C43F5B0735D71BA8572417D80B2CFF4440F1A85",
+  "notes": "1.4.0：面板新增「检查更新 / 更新到 vX」按钮，手机上一键升级；雷达在 OpenRouter 不可达时自动改用 Kilo 免费池；更新失败会给出具体原因。"
+}
