@@ -4,10 +4,14 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
+import { fileURLToPath } from 'node:url'
 import { catalog, accessLabels, relayProtocols } from './catalog.js'
 
 const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
+// Keep in sync with package.json; the update check falls back to this when the
+// loader gives us an entry URL that does not sit next to package.json.
+const PLUGIN_VERSION = '1.4.4'
 
 export const inject = ['webServer']
 
@@ -1340,7 +1344,7 @@ function snapshot(ctx, state) {
   const pollinationsInstalled = installedFor(POLLINATIONS_ROUTE)
   return {
     ok: true,
-    build: '1.4.3',
+    build: PLUGIN_VERSION,
     sources: [...catalog.map(decorate), ...(state.feedSources || []).map(decorate)],
     accessLabels,
     radar: state.radar || null,
@@ -1407,11 +1411,13 @@ function updateUrls(channel) {
 
 function localVersion() {
   try {
-    const raw = fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')
-    return JSON.parse(raw).version || '0.0.0'
+    const entry = path.dirname(fileURLToPath(import.meta.url))
+    const version = JSON.parse(fs.readFileSync(path.join(entry, 'package.json'), 'utf8')).version
+    if (version) return String(version)
   } catch {
-    return '0.0.0'
+    /* the loader may hand us an entry URL that does not sit next to package.json */
   }
+  return PLUGIN_VERSION
 }
 
 function compareVersions(left, right) {
@@ -1519,7 +1525,28 @@ async function installUpdate(ctx, state, body, config) {
     }
   }
   if (!downloaded) throw new Error(`下载失败（已试 ${candidates.length} 个地址）：${failures.join('；')}`)
-  const result = await manager.installBundle(downloaded.file, { enabled: true })
+  let result = null
+  try {
+    result = await manager.installBundle(downloaded.file, { enabled: true })
+  } catch (error) {
+    if (!/already[\s-]?installed|no[\s-]?change/i.test(String(error?.message || error))) throw error
+    result = { application: 'unchanged' }
+  }
+  const code = String(result?.error?.code || '')
+  const unchanged = /already[\s-]?installed|no[\s-]?change/i.test(code)
+  if (unchanged) {
+    // Same bytes already installed: that is not a failure, the panel shows "up to date".
+    return {
+      ok: true,
+      upToDate: true,
+      unchanged: true,
+      from: current,
+      to: latest || current,
+      application: 'unchanged',
+      bytes: downloaded.bytes,
+      file: downloaded.file,
+    }
+  }
   return {
     ok: result?.application !== 'failed',
     from: current,
