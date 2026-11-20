@@ -11,7 +11,17 @@ const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
 // Keep in sync with package.json; the update check falls back to this when the
 // loader gives us an entry URL that does not sit next to package.json.
-const PLUGIN_VERSION = '1.4.6'
+const PLUGIN_VERSION = '1.4.7'
+
+/**
+ * Release signing key (Ed25519, public half). The private half lives outside the
+ * repository at D:\python\鸡蛋私钥.pem and is only used by publish-github.ps1.
+ * Replacing this constant means replacing the trust root: ships a new key and every
+ * installed copy must be updated manually once, so treat the private key as precious.
+ */
+const UPDATE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEANg2VG31PFiDspqYP4Jsv2tri0jZNtnUZluNf2LYKJ1o=
+-----END PUBLIC KEY-----`
 
 export const inject = ['webServer']
 
@@ -179,6 +189,22 @@ async function getJson(url, timeoutMs, extraHeaders) {
     })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return await response.json()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function getText(url, timeoutMs) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, {
+      headers: { accept: 'application/json, text/plain, */*', 'user-agent': UA, 'cache-control': 'no-cache' },
+      signal: controller.signal,
+      redirect: 'follow',
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return await response.text()
   } finally {
     clearTimeout(timer)
   }
@@ -1454,37 +1480,106 @@ function compareVersions(left, right) {
   return 0
 }
 
+/**
+ * The published update.json must come with update.json.sig: an Ed25519 signature
+ * over the exact manifest bytes, made by the release key. A poisoned mirror
+ * (jsDelivr / raw / release asset) can then only make the update fail, never
+ * install code, because it cannot forge a signature.
+ */
+function verifyManifest(text, signature) {
+  const manifest = String(text || '')
+  const sig = String(signature || '').trim()
+  if (!manifest.trim()) throw new Error('更新清单为空')
+  if (!sig) throw new Error('更新清单缺少签名（update.json.sig）')
+  let verified = false
+  try {
+    verified = crypto.verify(
+      null,
+      Buffer.from(manifest, 'utf8'),
+      crypto.createPublicKey(UPDATE_PUBLIC_KEY),
+      Buffer.from(sig, 'base64'),
+    )
+  } catch (error) {
+    throw new Error(`更新清单签名校验失败：${error?.message || error}`)
+  }
+  if (!verified) throw new Error('更新清单签名校验失败（可能被篡改或镜像投毒）')
+  let doc = null
+  try {
+    doc = JSON.parse(manifest)
+  } catch {
+    throw new Error('更新清单不是合法 JSON')
+  }
+  const version = String(doc?.version || '').trim()
+  if (!version) throw new Error('update.json 缺少 version 字段')
+  const tarball = String(doc?.tarball || '').trim()
+  if (!/^https?:\/\//i.test(tarball)) throw new Error('update.json 的 tarball 地址无效')
+  const sha256 = String(doc?.sha256 || '').trim()
+  if (!/^[0-9a-f]{64}$/i.test(sha256)) throw new Error('update.json 的 sha256 格式不正确')
+  return {
+    version,
+    tarball,
+    sha256,
+    tarballMirrors: Array.isArray(doc?.tarballMirrors) ? doc.tarballMirrors.map(String).filter(Boolean) : [],
+    notes: String(doc?.notes || '').slice(0, 500),
+  }
+}
+
+function describeUpdateError(error, timeoutMs) {
+  const message = String(error?.message || '')
+  if (message.includes('签名') || message.includes('JSON') || message.includes('缺少') || message.includes('清单')) {
+    return message
+  }
+  return describeNetworkError(error, timeoutMs)
+}
+
+function describeDownloadError(error, timeoutMs) {
+  const message = String(error?.message || '')
+  // Integrity failures must not be reported as "the network is unreachable".
+  if (/sha256|校验|过小|地址无效/.test(message)) return message
+  return describeNetworkError(error, timeoutMs)
+}
+
 async function checkUpdate(state, config) {
   const channel = updateChannel(config, state)
   const current = localVersion()
   const attempts = []
   for (const url of updateUrls(channel)) {
     try {
-      const doc = await getJson(url, 15000)
-      const latest = String(doc?.version || '').trim()
-      if (!latest) throw new Error('update.json 缺少 version 字段')
+      const text = await getText(url, 15000)
+      let signature = ''
+      try {
+        signature = await getText(`${url}.sig`, 15000)
+      } catch (error) {
+        throw new Error(`更新清单缺少签名（update.json.sig 不可用：${String(error?.message || error)}）`)
+      }
+      const doc = verifyManifest(text, signature)
       return {
         ok: true,
         current,
-        latest,
-        newer: compareVersions(latest, current) > 0,
-        tarball: String(doc?.tarball || ''),
-        tarballMirrors: Array.isArray(doc?.tarballMirrors) ? doc.tarballMirrors.map(String).filter(Boolean) : [],
-        sha256: String(doc?.sha256 || ''),
-        notes: String(doc?.notes || '').slice(0, 500),
+        latest: doc.version,
+        newer: compareVersions(doc.version, current) > 0,
+        tarball: doc.tarball,
+        tarballMirrors: doc.tarballMirrors,
+        sha256: doc.sha256,
+        notes: doc.notes,
         source: url,
         channel,
+        signed: true,
       }
     } catch (error) {
-      attempts.push({ url, error: describeNetworkError(error, 15000) })
+      attempts.push({ url, error: describeUpdateError(error, 15000) })
     }
   }
+  const signaturesSeen = attempts.some(item => item.error.includes('签名'))
   return {
     ok: false,
     current,
     channel,
-    error: `无法读取更新信息（已试 ${attempts.length} 个地址）`,
+    error: signaturesSeen
+      ? `更新清单校验未通过（已试 ${attempts.length} 个地址）：${attempts[0]?.error || ''}`
+      : `无法读取更新信息（已试 ${attempts.length} 个地址）`,
     attempts,
+    signedRequired: true,
   }
 }
 
@@ -1522,14 +1617,23 @@ async function installUpdate(ctx, state, body, config) {
   const manager = ctx.get('pluginManager')
   if (!manager) throw new Error('当前运行环境没有 pluginManager 服务，无法自动安装更新')
   const current = localVersion()
-  let url = String(body?.url || '').trim()
-  let sha256 = String(body?.sha256 || '').trim()
-  let latest = String(body?.version || '').trim()
-  let mirrors = Array.isArray(body?.mirrors) ? body.mirrors.map(String).filter(Boolean) : []
-  if (!url) {
+  let url = ''
+  let sha256 = ''
+  let latest = ''
+  let mirrors = []
+  if (body?.url) {
+    // Only a signed manifest may name its own tarball: without this check the local
+    // API could be asked to install an arbitrary package.
+    if (!body?.manifest || !body?.signature) throw new Error('拒绝安装：未经签名的更新清单')
+    const doc = verifyManifest(String(body.manifest), String(body.signature))
+    url = doc.tarball
+    sha256 = doc.sha256
+    latest = doc.version
+    mirrors = doc.tarballMirrors
+  } else {
     const checked = await checkUpdate(state, config)
     if (!checked.ok) throw new Error(checked.error)
-    if (!checked.newer) return { ok: true, upToDate: true, current, latest: checked.latest }
+    if (!checked.newer) return { ok: true, upToDate: true, current, latest: checked.latest, signed: true }
     url = checked.tarball
     mirrors = checked.tarballMirrors
     sha256 = checked.sha256
@@ -1544,7 +1648,7 @@ async function installUpdate(ctx, state, body, config) {
       downloaded = await downloadUpdate(candidate, sha256, latest)
       break
     } catch (error) {
-      failures.push(`${candidate}: ${describeNetworkError(error, 120000)}`)
+      failures.push(`${candidate}: ${describeDownloadError(error, 120000)}`)
     }
   }
   if (!downloaded) throw new Error(`下载失败（已试 ${candidates.length} 个地址）：${failures.join('；')}`)
@@ -2066,4 +2170,4 @@ export function apply(ctx, config = {}) {
 }
 
 /** Exposed for the offline test harness only; not a supported API. */
-export const internals = { refreshRadar, refreshKilo, radarFromKilo, describeNetworkError }
+export const internals = { refreshRadar, refreshKilo, radarFromKilo, describeNetworkError, verifyManifest, compareVersions }
