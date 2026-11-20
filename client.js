@@ -16,10 +16,11 @@ window.__ModuleLoader__.load({
         'tab.anon': '匿名免费',
         'anon.title': '匿名免费模型（免注册 · 免 Key）',
         'anon.note':
-          '直连 Kilo 公共免费网关，DSH 适配器强制带鉴权头，所以由本插件在本机 127.0.0.1 做一次纯转发把该头去掉；不经过 dsh-our-free-model，也不保存对话内容。免费池的提示词可能被上游记录，勿发敏感内容。',
+          '直连 Kilo 公共免费网关，DSH 适配器强制带鉴权头，所以由本插件在本机随机机房端口（每台设备自己的端口，从 18878 起随机挑，被占用自动顺延）做一次纯转发把该头去掉；不经过 dsh-our-free-model，也不保存对话内容。免费池的提示词可能被上游记录，勿发敏感内容。',
         'anon.count': '免费模型 {n} 个',
         'anon.enabled': '已启用 {n} 个',
         'anon.route': '路由 {route}',
+        'anon.port': '本机机房 :{port}',
         'anon.train': '可能记录提示词',
         'anon.enable': '启用',
         'anon.enabledState': '已启用',
@@ -185,10 +186,11 @@ window.__ModuleLoader__.load({
         'tab.anon': 'No-key',
         'anon.title': 'Anonymous free models (no sign-up, no key)',
         'anon.note':
-          "Straight to Kilo's public free gateway. DSH's adapter always sends an auth header, so this plugin forwards through 127.0.0.1 and strips it — dsh-our-free-model is not involved and conversations are not stored. The free pool may log prompts upstream; never send sensitive content.",
+          "Straight to Kilo's public free gateway. DSH's adapter always sends an auth header, so this plugin forwards through a random local host port (one per device, picked at random from 18878 up, falling through when busy) and strips it — dsh-our-free-model is not involved and conversations are not stored. The free pool may log prompts upstream; never send sensitive content.",
         'anon.count': '{n} free models',
         'anon.enabled': '{n} enabled',
         'anon.route': 'route {route}',
+        'anon.port': 'local host :{port}',
         'anon.train': 'may log prompts',
         'anon.enable': 'Enable',
         'anon.enabledState': 'Enabled',
@@ -794,7 +796,7 @@ window.__ModuleLoader__.load({
     }
 
     function AnonGroup(props) {
-      const { t, group, title, note, route, showTest, busy, testing, healthBusy, onInstall, onTest, onDisable, onPrune, onHealth } = props
+      const { t, group, title, note, route, showTest, busy, testing, healthBusy, port, onInstall, onTest, onDisable, onPrune, onHealth } = props
       const items = (group && group.items) || []
       const installed = new Set((group && group.installed) || [])
       const stale = (group && group.stale) || []
@@ -854,6 +856,7 @@ window.__ModuleLoader__.load({
             h('span', { className: 'ce-badge ok' }, t('anon.count', { n: items.length })),
             installed.size ? h('span', { className: 'ce-badge ok' }, t('anon.enabled', { n: installed.size })) : null,
             stale.length ? h('span', { className: 'ce-badge' }, t('anon.stale', { n: stale.length })) : null,
+            port ? h('span', { className: 'ce-badge ok' }, t('anon.port', { port })) : null,
             h('span', { className: 'ce-hint' }, t('anon.route', { route })),
           ),
           group && group.error ? h('div', { className: 'ce-error', role: 'alert', style: { marginTop: 8 } }, group.error) : null,
@@ -911,7 +914,7 @@ window.__ModuleLoader__.load({
     }
 
     function AnonTab(props) {
-      const { t, kilo, pollinations, anon, busy, testing, healthBusy, kiloActions, pollinationsActions, onUnblock } = props
+      const { t, kilo, pollinations, anon, proxyPort, busy, testing, healthBusy, kiloActions, pollinationsActions, onUnblock } = props
       const blocked = (anon && anon.blocked) || []
       return h(
         'div',
@@ -937,6 +940,7 @@ window.__ModuleLoader__.load({
               busy,
               testing,
               healthBusy,
+              port: proxyPort,
             },
             kiloActions || {},
           ),
@@ -1718,6 +1722,20 @@ window.__ModuleLoader__.load({
         checkUpdate(false)
       }, [])
 
+      // The host can only rewrite the provider route outside its apply transaction,
+      // so nudge it as soon as the panel is up.
+      useEffect(() => {
+        let cancelled = false
+        api('/kilo/heal', {}, { allowFail: true })
+          .then(result => {
+            if (!cancelled && result && result.state) setData(result.state)
+          })
+          .catch(() => {})
+        return () => {
+          cancelled = true
+        }
+      }, [])
+
       const applyUpdate = useCallback(async () => {
         setUpdateBusy('install')
         try {
@@ -2040,6 +2058,7 @@ window.__ModuleLoader__.load({
                       kilo: data?.kilo || null,
                       pollinations: data?.pollinations || null,
                       anon: data?.anon || null,
+                      proxyPort: data?.proxy?.port || null,
                       busy: kiloBusy,
                       testing: kiloTesting,
                       healthBusy,
