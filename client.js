@@ -72,6 +72,10 @@ window.__ModuleLoader__.load({
         'radar.sourceKilo': 'Kilo 数据源',
         'radar.hint': '国内网络通常无法直连 OpenRouter；可挂代理后点「刷新鸡蛋」重试，或直接用「匿名免费」页里的 Kilo 免费池。',
         'radarUpdated': '已更新：当前 {n} 个免费模型',
+        'refreshRoutes': '已同步 {a} 个已装来源，移除 {b} 个失效模型',
+        'catalog.label': '官方源清单 {version} · 更新于 {time}',
+        'catalog.bundled': '官方源清单为内置版，点「刷新鸡蛋」拉取最新清单与文案',
+        'catalog.failed': '官方源清单拉取失败（{msg}），继续使用缓存',
         'refreshEggs': '刷新鸡蛋',
         'refreshing': '刷新中…',
         'showAll': '展开全部 {n} 个',
@@ -247,6 +251,10 @@ window.__ModuleLoader__.load({
         'radar.hint':
           'OpenRouter is usually unreachable from mainland networks. Use a proxy and press Refresh eggs, or use the Kilo pool on the No-key tab.',
         'radarUpdated': 'Updated: {n} free models right now',
+        'refreshRoutes': 'Synced {a} installed sources, removed {b} stale models',
+        'catalog.label': 'Official catalogue {version} · updated {time}',
+        'catalog.bundled': 'Using the bundled official catalogue. Press Refresh eggs to fetch the latest copy and descriptions.',
+        'catalog.failed': 'Official catalogue fetch failed ({msg}); using the cached copy',
         'refreshEggs': 'Refresh eggs',
         'refreshing': 'Refreshing…',
         'showAll': 'Show all {n}',
@@ -991,7 +999,7 @@ window.__ModuleLoader__.load({
     }
 
     function MarketTab(props) {
-      const { t, sources, accessLabels, radar, feeds, refresh, refreshEggs, refreshing, toast, onFeed } = props
+      const { t, sources, accessLabels, radar, officialCatalog, feeds, refresh, refreshEggs, refreshing, toast, onFeed } = props
       const [drafts, setDrafts] = useState({})
       const [opened, setOpened] = useState({})
       const [busy, setBusy] = useState({})
@@ -1161,6 +1169,8 @@ window.__ModuleLoader__.load({
         )
       }
 
+      const catalogInfo = officialCatalog || {}
+      const catalogChecked = catalogInfo.updatedAt ? new Date(catalogInfo.updatedAt).toLocaleString() : '—'
       const groups = [
         { id: 'hot', title: t('group.hot'), mark: '🔥', items: sources.filter(source => source.tier === 'hot') },
         { id: 'pick', title: t('group.pick'), mark: t('group.pickMark'), items: sources.filter(source => source.tier === 'pick') },
@@ -1177,6 +1187,20 @@ window.__ModuleLoader__.load({
         'div',
         null,
         h(RadarPanel, { t, radar, onRefresh: refreshEggs, refreshing }),
+        h(
+          'div',
+          { className: 'ce-panel', style: { marginBottom: 12 } },
+          h(
+            'div',
+            { className: 'ce-hint' },
+            catalogInfo.cached
+              ? t('catalog.label', { version: catalogInfo.version || '—', time: catalogChecked })
+              : t('catalog.bundled'),
+          ),
+          catalogInfo.error
+            ? h('div', { className: 'ce-error', role: 'alert', style: { marginTop: 6 } }, t('catalog.failed', { msg: catalogInfo.error }))
+            : null,
+        ),
         groups.map(group =>
           h(
             'section',
@@ -1743,9 +1767,7 @@ window.__ModuleLoader__.load({
         [t],
       )
 
-      useEffect(() => {
-        checkUpdate(false)
-      }, [])
+      // Update checks are explicit: opening the panel never contacts the release API.
 
       // The host can only rewrite the provider route outside its apply transaction,
       // so nudge it as soon as the panel is up.
@@ -1792,32 +1814,7 @@ window.__ModuleLoader__.load({
         }
       }, [t])
 
-      const kiloEnsured = useRef(false)
-      useEffect(() => {
-        if (!data || kiloEnsured.current) return
-        kiloEnsured.current = true
-        if (((data.kilo && data.kilo.items) || []).length === 0) {
-          api('/kilo/models', { force: false })
-            .then(result => {
-              if (result.state) setData(result.state)
-            })
-            .catch(() => {})
-        }
-        if (((data.pollinations && data.pollinations.items) || []).length === 0) {
-          api('/pollinations/models', { force: true })
-            .then(result => {
-              if (result.state) setData(result.state)
-            })
-            .catch(() => {})
-        }
-        if (((data.llm7 && data.llm7.items) || []).length === 0) {
-          api('/llm7/models', { force: true })
-            .then(result => {
-              if (result.state) setData(result.state)
-            })
-            .catch(() => {})
-        }
-      }, [data])
+      // Model pools are refreshed only by the explicit Refresh eggs button.
 
       const refreshEggs = useCallback(async () => {
         setRefreshing(true)
@@ -1825,9 +1822,17 @@ window.__ModuleLoader__.load({
           const result = await api('/refresh', {})
           if (result.state) setData(result.state)
           const radar = result.state?.radar
-          if (radar?.error) toast(`${t('radar.failed')}：${radar.error}`, 'bad')
-          else if (radar?.warning) toast(t('radar.fallback', { msg: radar.warning }), 'ok')
-          else toast(t('radarUpdated', { n: radar?.freeCount ?? 0 }), 'ok')
+          const catalog = result.officialCatalog || {}
+          const routes = result.installedRoutes || {}
+          const pieces = []
+          if (radar?.error) pieces.push(`${t('radar.failed')}：${radar.error}`)
+          else if (radar?.warning) pieces.push(t('radar.fallback', { msg: radar.warning }))
+          else pieces.push(t('radarUpdated', { n: radar?.freeCount ?? 0 }))
+          if (routes.updated || routes.removedModels) {
+            pieces.push(t('refreshRoutes', { a: routes.updated || 0, b: routes.removedModels || 0 }))
+          }
+          if (catalog.ok === false) pieces.push(t('catalog.failed', { msg: catalog.error || '' }))
+          toast(pieces.join(' · '), radar?.error || catalog.ok === false ? 'bad' : 'ok')
         } catch (caught) {
           toast(String(caught?.message || t('unknownError')), 'bad')
         } finally {
@@ -1962,14 +1967,7 @@ window.__ModuleLoader__.load({
         try {
           const result = await api('/anon/unblock', {})
           if (result.state) setData(result.state)
-          for (const path of ['/kilo/models', '/pollinations/models']) {
-            try {
-              const list = await api(path, { force: true })
-              if (list.state) setData(list.state)
-            } catch {
-              /* the pool list will refresh on its own */
-            }
-          }
+          // Do not fetch pools here: the next explicit Refresh eggs will do that.
           toast(t('anon.unblock', { n: result.unblocked || 0 }), 'ok')
         } catch (caught) {
           toast(String(caught?.message || t('unknownError')), 'bad')
@@ -2108,6 +2106,7 @@ window.__ModuleLoader__.load({
                       sources,
                       accessLabels: data?.accessLabels || {},
                       radar: data?.radar || null,
+                      officialCatalog: data?.officialCatalog || null,
                       feeds: data?.feeds || [],
                       refresh,
                       refreshEggs,
