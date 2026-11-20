@@ -11,7 +11,7 @@ const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
 // Keep in sync with package.json; the update check falls back to this when the
 // loader gives us an entry URL that does not sit next to package.json.
-const PLUGIN_VERSION = '1.4.4'
+const PLUGIN_VERSION = '1.4.6'
 
 export const inject = ['webServer']
 
@@ -381,6 +381,10 @@ const KILO_ROUTE = 'kilo-free'
 const KILO_REF = 'KILO_FREE_NOAUTH'
 const KILO_LISTING_HEADERS = { 'http-referer': 'https://kilo.ai/', 'x-title': 'dsh-cyber-egg' }
 const KILO_PROXY_PORT = 18878
+// 18878–20877: 2000 ports, so two thousand devices can each keep their own room
+// without colliding. Ephemeral ranges on Windows/Linux start much higher.
+const KILO_PROXY_SPAN = 2000
+const KILO_PROXY_TRIES = 200
 const KILO_PROXY_PATHS = new Set(['/v1/models', '/v1/chat/completions', '/v1/completions'])
 
 /**
@@ -388,14 +392,32 @@ const KILO_PROXY_PATHS = new Set(['/v1/models', '/v1/chat/completions', '/v1/com
  * while DSH's OpenAI-compatible adapter always sends one. This loopback proxy
  * forwards the wire body unchanged and drops that header, so the route stays a
  * plain openai-completions provider with full streaming and tool-call support.
+ *
+ * Every device is its own "local machine room": the listen port is picked at
+ * random inside [18878, 19078) and remembered per install, so two phones/PCs do
+ * not fight over the same number. A busy port falls through to the next one and
+ * the provider route is rewritten to the port that actually bound.
  */
 function kiloProxyUrl(port) {
   return `http://127.0.0.1:${port}/v1`
 }
 
+function pickProxyStartPort(preferred) {
+  const value = Number(preferred)
+  if (value >= KILO_PROXY_PORT && value < KILO_PROXY_PORT + KILO_PROXY_SPAN) return value
+  // Keep 18878 out of the first random pick: it is the old fixed value, so every
+  // upgraded install would otherwise land on the same "machine room" again.
+  return KILO_PROXY_PORT + 1 + Math.floor(Math.random() * (KILO_PROXY_SPAN - 1))
+}
+
+function nextProxyPort(port) {
+  const next = port + 1
+  return next < KILO_PROXY_PORT + KILO_PROXY_SPAN ? next : KILO_PROXY_PORT
+}
+
 function startKiloProxy(preferredPort) {
   return new Promise(resolve => {
-    let port = Number(preferredPort) > 0 ? Number(preferredPort) : KILO_PROXY_PORT
+    let port = pickProxyStartPort(preferredPort)
     let attempt = 0
     const listen = () => {
       const server = http.createServer(async (req, res) => {
@@ -443,9 +465,9 @@ function startKiloProxy(preferredPort) {
         }
       })
       server.once('error', error => {
-        if (error?.code === 'EADDRINUSE' && attempt < 12) {
+        if (error?.code === 'EADDRINUSE' && attempt < KILO_PROXY_TRIES) {
           attempt += 1
-          port += 1
+          port = nextProxyPort(port)
           listen()
           return
         }
@@ -557,7 +579,7 @@ async function installKilo(ctx, state, body, proxyPort) {
   const credentials = ctx.get('credentials')
   if (credentials) await credentials.set(KILO_REF, 'kilo-free-noauth')
   await settings.mutate(descriptor.ns, [{ op: 'set', path: ['providers', KILO_ROUTE], value: profile }], descriptor.revision)
-  state.kiloProxy = { port: proxyPort, at: new Date().toISOString() }
+  state.kiloProxy = { ...(state.kiloProxy || {}), port: proxyPort, random: true, at: new Date().toISOString() }
   saveState(state)
   let registered = false
   try {
@@ -1366,6 +1388,7 @@ function snapshot(ctx, state) {
       blocked: state.anonBlocked || [],
       health: state.anonHealth || null,
     },
+    proxy: { port: state.kiloProxy?.port || null, healError: state.kiloProxy?.healError || null },
     feeds: state.feeds || [],
     protocols: relayProtocols,
     relays: state.relays.map(relay => ({
@@ -1686,37 +1709,67 @@ export function apply(ctx, config = {}) {
 
   const healKiloRoute = async () => {
     const settings = ctx.get('settings')
-    if (!settings || !runtime.proxyPort) return
+    if (!settings || !runtime.proxyPort) return false
+    let descriptor = null
+    try {
+      descriptor = providerDescriptor(settings)
+    } catch {
+      return false
+    }
     const credentials = ctx.get('credentials')
     const expected = kiloProxyUrl(runtime.proxyPort)
-    const descriptor = providerDescriptor(settings)
     const profile = descriptor.value && descriptor.value.providers && descriptor.value.providers[KILO_ROUTE]
-    if (!profile) return
+    if (!profile) return true
     if (credentials && !profile.apiKeyEnv) {
       await credentials.set(KILO_REF, 'kilo-free-noauth').catch(() => {})
     }
-    if (profile.baseURL === expected) return
-    await settings.mutate(
-      descriptor.ns,
-      [
-        { op: 'set', path: ['providers', KILO_ROUTE, 'baseURL'], value: expected },
-        ...(profile.apiKeyEnv ? [] : [{ op: 'set', path: ['providers', KILO_ROUTE, 'apiKeyEnv'], value: KILO_REF }]),
-      ],
-      descriptor.revision,
-    )
+    if (profile.baseURL === expected) {
+      if (state.kiloProxy?.healError) {
+        state.kiloProxy = { ...state.kiloProxy, healError: null }
+        saveState(state)
+      }
+      return true
+    }
+    // Write the whole profile back: the settings service accepts the same shape the
+    // installer uses, while a nested path update is not portable across versions.
+    const value = { ...profile, baseURL: expected }
+    if (!value.apiKeyEnv) value.apiKeyEnv = KILO_REF
+    await settings.mutate(descriptor.ns, [{ op: 'set', path: ['providers', KILO_ROUTE], value }], descriptor.revision)
+    state.kiloProxy = { ...(state.kiloProxy || {}), port: runtime.proxyPort, random: true, healError: null, at: new Date().toISOString() }
+    saveState(state)
+    // The machine room moved: re-pull the free list so the panel and the route agree.
+    await refreshKilo(state, false).catch(() => {})
+    return true
   }
 
-  const proxyReady = startKiloProxy(state.kiloProxy?.port).then(result => {
+  // settings.mutate internally opens an HMR transaction, so it can only run outside
+  // the plugin-apply context (timers inherit it through AsyncLocalStorage and fail
+  // with "HMR transactions cannot be nested"). Healing therefore happens on the next
+  // API request — the panel calls /kilo/heal right after it loads.
+  let healing = false
+  const maybeHealRoute = () => {
+    if (healing || !runtime.proxyPort) return
+    healing = true
+    healKiloRoute()
+      .catch(() => {})
+      .finally(() => {
+        healing = false
+      })
+  }
+
+  const rememberedPort = state.kiloProxy?.random === true ? Number(state.kiloProxy?.port) || 0 : 0
+  const proxyReady = startKiloProxy(rememberedPort).then(result => {
     if (result.error) {
       console.error(`[${NAME}] kilo proxy failed:`, result.error)
       return null
     }
     runtime.proxyPort = result.port
     runtime.proxyServer = result.server
-    healKiloRoute().catch(error => console.error(`[${NAME}] kilo route heal failed:`, error))
-    setTimeout(() => {
-      healKiloRoute().catch(error => console.error(`[${NAME}] kilo route heal retry failed:`, error))
-    }, 4000).unref?.()
+    if (state.kiloProxy?.port !== result.port || state.kiloProxy?.random !== true) {
+      state.kiloProxy = { port: result.port, random: true, at: new Date().toISOString() }
+      saveState(state)
+    }
+    // Deferred to request time, see maybeHealRoute below.
     return result.port
   })
 
@@ -1791,6 +1844,10 @@ export function apply(ctx, config = {}) {
     kiloTest: async () => {
       await proxyReady
       return testKilo(ctx)
+    },
+    kiloHeal: async () => {
+      const healed = await healKiloRoute()
+      return { ok: true, healed, port: runtime.proxyPort, state: snapshot(ctx, state) }
     },
     kiloUninstall: async () => {
       const settings = ctx.get('settings')
@@ -1919,6 +1976,7 @@ export function apply(ctx, config = {}) {
           json(res, 403, { ok: false, error: '来源不允许' })
           return
         }
+        maybeHealRoute()
         const url = new URL(req.url || '/', 'http://127.0.0.1')
         const route = url.pathname.slice(API_PREFIX.length).replace(/\/+$/, '') || '/'
         try {
@@ -1957,6 +2015,7 @@ export function apply(ctx, config = {}) {
           if (route === '/update/verify') return json(res, 200, await handlers.updateVerify(body))
           if (route === '/update/channel') return json(res, 200, await handlers.updateChannel(body))
           if (route === '/kilo/install') return json(res, 200, await handlers.kiloInstall(body))
+          if (route === '/kilo/heal') return json(res, 200, await handlers.kiloHeal(body))
           if (route === '/kilo/uninstall') return json(res, 200, await handlers.kiloUninstall(body))
           if (route === '/kilo/test') return json(res, 200, await handlers.kiloTest(body))
           if (route === '/kilo/models') return json(res, 200, await handlers.kiloModels(body))
@@ -1983,8 +2042,14 @@ export function apply(ctx, config = {}) {
     const stopScheduler = startScheduler(ctx, state, runDue)
     scheduler = stopScheduler
     const disposeTool = registerTool(ctx, state, handlers)
+    // Machine room first, pools second: wait for the proxy to bind (and record the
+    // port this device got) before pulling any model list.
     const radarTimer = setTimeout(() => {
-      Promise.allSettled([refreshRadar(state), refreshKilo(state, false), refreshPollinations(state, false)])
+      Promise.resolve(proxyReady)
+        .then(port => {
+          console.log(`[${NAME}] local machine room ready on 127.0.0.1:${port || '?'}`)
+          return Promise.allSettled([refreshRadar(state), refreshKilo(state, false), refreshPollinations(state, false)])
+        })
         .then(() => saveState(state))
         .catch(() => {})
     }, 4000)
