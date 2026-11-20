@@ -1,10 +1,10 @@
 {
-  "version": "1.4.7",
-  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.7/cyber-egg-1.4.7.tgz",
+  "version": "1.4.8",
+  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.4.8/cyber-egg-1.4.8.tgz",
   "tarballMirrors": [
-    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.7/cyber-egg-1.4.7.tgz",
-    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.7/cyber-egg-1.4.7.tgz"
+    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.4.8/cyber-egg-1.4.8.tgz",
+    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.4.8/cyber-egg-1.4.8.tgz"
   ],
-  "sha256": "61334EE3E2EA5DD4D6C0CBC6DC897D4C0671A392C48A0AE10382A76C8BCD13F7",
-  "notes": "1.4.7：自更新清单加 Ed25519 签名（update.json.sig）——版本号、sha256、下载地址都在签名信封里，任何镜像被投毒只会让升级失败、不会装上被改过的包；验签不通过时面板提示到 Release 手动下载。桌面端与安卓 DSH Go 同一安装包。"
+  "sha256": "5EB6D0A4CFB928893439A3C19D717862796A8E4EEED7659809E920B209B1A806",
+  "notes": "1.4.8：匿名免费的说明精简为「由本插件在本机随机机房端口做一次纯转发」，不再展示端口数字与内部实现细节；GitHub 页面与插件描述同步精简。桌面端与安卓 DSH Go 同一安装包。"
 }
