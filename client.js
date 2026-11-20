@@ -166,7 +166,7 @@ window.__ModuleLoader__.load({
         'relay.added': '中转站已添加',
         'relay.keywordPlaceholder': '签到成功',
         'relay.testKeepToken': '用已保存的口令测试',
-        'anon.health': '体检可用性',
+        'anon.health': '全池体检',
         'anon.healthRunning': '逐个发「你好」…',
         'anon.healthDone': '体检完成：{kept} 个能聊，移除 {removed} 个连不上的',
         'anon.healthClean': '体检完成：{kept} 个全部能聊',
@@ -176,6 +176,8 @@ window.__ModuleLoader__.load({
         'anon.blocked': '已屏蔽 {n} 个连不上的',
         'pollinations.title': 'Pollinations 免注册池',
         'pollinations.note': '免 Key、免注册的公共接口；免费额度是每个 IP 每 45 秒 1 次，适合偶尔顶一下。',
+        'llm7.title': 'LLM7 免注册池',
+        'llm7.note': '免 Key、免注册的公共接口；免费额度按模型计算、很少，经常返回 429，只适合偶尔顶一下。',
         'update.health': '更新后体检：{kept} 个能聊，移除 {removed} 个',
         'update.signed': '清单已验签',
         'update.badSignature': '更新清单未通过签名校验，已拒绝安装。请到 Release 页面手动下载安装包。',
@@ -339,7 +341,7 @@ window.__ModuleLoader__.load({
         'relay.added': 'Relay added',
         'relay.keywordPlaceholder': 'checkin success',
         'relay.testKeepToken': 'Test with the saved token',
-        'anon.health': 'Check which models answer',
+        'anon.health': 'Scan all free models',
         'anon.healthRunning': 'Saying hi to each model…',
         'anon.healthDone': 'Check done: {kept} usable, {removed} unreachable removed',
         'anon.healthClean': 'Check done: all {kept} answer',
@@ -349,6 +351,8 @@ window.__ModuleLoader__.load({
         'anon.blocked': '{n} unreachable blocked',
         'pollinations.title': 'Pollinations no-signup pool',
         'pollinations.note': 'Public no-key, no-signup endpoint; the free tier allows one reply per IP every 45 seconds.',
+        'llm7.title': 'LLM7 no-signup pool',
+        'llm7.note': 'Public no-key, no-signup endpoint; the free allowance is small and per model, so 429s are common. Good only for the occasional request.',
         'update.health': 'Checked after update: {kept} usable, {removed} removed',
         'update.signed': 'manifest signed',
         'update.badSignature': 'The update manifest failed signature verification, so the install was refused. Download the package manually from the Release page.',
@@ -918,7 +922,7 @@ window.__ModuleLoader__.load({
     }
 
     function AnonTab(props) {
-      const { t, kilo, pollinations, anon, proxyPort, busy, testing, healthBusy, kiloActions, pollinationsActions, onUnblock } = props
+      const { t, kilo, pollinations, llm7, anon, proxyPort, busy, testing, healthBusy, kiloActions, pollinationsActions, llm7Actions, onUnblock } = props
       const blocked = (anon && anon.blocked) || []
       return h(
         'div',
@@ -964,6 +968,23 @@ window.__ModuleLoader__.load({
               healthBusy,
             },
             pollinationsActions || {},
+          ),
+        ),
+        h(
+          AnonGroup,
+          Object.assign(
+            {
+              t,
+              group: llm7,
+              title: t('llm7.title'),
+              note: t('llm7.note'),
+              route: 'llm7-free',
+              showTest: false,
+              busy,
+              testing: false,
+              healthBusy,
+            },
+            llm7Actions || {},
           ),
         ),
       )
@@ -1789,6 +1810,13 @@ window.__ModuleLoader__.load({
             })
             .catch(() => {})
         }
+        if (((data.llm7 && data.llm7.items) || []).length === 0) {
+          api('/llm7/models', { force: true })
+            .then(result => {
+              if (result.state) setData(result.state)
+            })
+            .catch(() => {})
+        }
       }, [data])
 
       const refreshEggs = useCallback(async () => {
@@ -1880,10 +1908,40 @@ window.__ModuleLoader__.load({
         }
       }, [t])
 
+      const llm7Install = useCallback(
+        async payload => {
+          setKiloBusy(true)
+          try {
+            const result = await api('/llm7/install', payload)
+            if (result.state) setData(result.state)
+            const count = Array.isArray(result.installed) ? result.installed.length : 0
+            toast(t('anon.enabled', { n: count }), 'ok')
+          } catch (caught) {
+            toast(`${t('anon.fail')}：${String(caught?.message || t('unknownError'))}`, 'bad')
+          } finally {
+            setKiloBusy(false)
+          }
+        },
+        [t],
+      )
+
+      const llm7Disable = useCallback(async () => {
+        setKiloBusy(true)
+        try {
+          const result = await api('/llm7/uninstall', {})
+          if (result.state) setData(result.state)
+          toast(t('anon.disabled'), 'ok')
+        } catch (caught) {
+          toast(String(caught?.message || t('unknownError')), 'bad')
+        } finally {
+          setKiloBusy(false)
+        }
+      }, [t])
+
       const anonHealth = useCallback(async () => {
         setHealthBusy(true)
         try {
-          const result = await api('/anon/health', { prune: true }, { allowFail: true })
+          const result = await api('/anon/health', { prune: true, scope: 'pool' }, { allowFail: true })
           if (result.state) setData(result.state)
           const kept = (result.kept || []).length
           const limited = (result.rateLimited || []).length
@@ -2079,6 +2137,13 @@ window.__ModuleLoader__.load({
                         onInstall: pollinationsInstall,
                         onDisable: pollinationsDisable,
                         onPrune: () => pollinationsInstall({ all: true, prune: true }),
+                        onHealth: anonHealth,
+                      },
+                      llm7: data?.llm7 || null,
+                      llm7Actions: {
+                        onInstall: llm7Install,
+                        onDisable: llm7Disable,
+                        onPrune: () => llm7Install({ all: true, prune: true }),
                         onHealth: anonHealth,
                       },
                     })),
