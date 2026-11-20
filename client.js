@@ -16,7 +16,7 @@ window.__ModuleLoader__.load({
         'tab.anon': '匿名免费',
         'anon.title': '匿名免费模型（免注册 · 免 Key）',
         'anon.note':
-          '直连 Kilo 公共免费网关，DSH 适配器强制带鉴权头，所以由本插件在本机随机机房端口（每台设备自己的端口，从 18878 起随机挑，被占用自动顺延）做一次纯转发把该头去掉；不经过 dsh-our-free-model，也不保存对话内容。免费池的提示词可能被上游记录，勿发敏感内容。',
+          '直连 Kilo 公共免费网关，DSH 适配器强制带鉴权头，由本插件在本机随机机房端口做一次纯转发把该头去掉，不保存对话内容。免费池的提示词可能被上游记录，勿发敏感内容。',
         'anon.count': '免费模型 {n} 个',
         'anon.enabled': '已启用 {n} 个',
         'anon.route': '路由 {route}',
@@ -188,7 +188,7 @@ window.__ModuleLoader__.load({
         'tab.anon': 'No-key',
         'anon.title': 'Anonymous free models (no sign-up, no key)',
         'anon.note':
-          "Straight to Kilo's public free gateway. DSH's adapter always sends an auth header, so this plugin forwards through a random local host port (one per device, picked at random from 18878 up, falling through when busy) and strips it — dsh-our-free-model is not involved and conversations are not stored. The free pool may log prompts upstream; never send sensitive content.",
+          "Straight to Kilo's public free gateway. DSH's adapter always sends an auth header, so this plugin forwards through a random local port and strips it — conversations are not stored. The free pool may log prompts upstream; never send sensitive content.",
         'anon.count': '{n} free models',
         'anon.enabled': '{n} enabled',
         'anon.route': 'route {route}',
