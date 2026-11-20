@@ -152,6 +152,19 @@ window.__ModuleLoader__.load({
         'fail': '失败',
         'unknownError': '未知错误',
         'eggIcon': '赛博鸡蛋',
+        'common.requestFailed': '请求失败',
+        'feed.summary': '{n} 条 · {time}',
+        'mark.hotTitle': '大家用得最多',
+        'mark.pickTitle': '编辑推荐',
+        'mark.new': '新',
+        'group.pickMark': '荐',
+        'region.cn': '国内节点',
+        'region.intl': '海外节点',
+        'optional': '可选',
+        'relay.updated': '中转站已更新',
+        'relay.added': '中转站已添加',
+        'relay.keywordPlaceholder': '签到成功',
+        'relay.testKeepToken': '用已保存的口令测试',
       },
       en: {
         'entry.label': 'Cyber eggs',
@@ -298,7 +311,28 @@ window.__ModuleLoader__.load({
         'fail': 'failed',
         'unknownError': 'Unknown error',
         'eggIcon': 'Cyber eggs',
+        'common.requestFailed': 'Request failed',
+        'feed.summary': '{n} items · {time}',
+        'mark.hotTitle': 'Most used',
+        'mark.pickTitle': 'Editor picks',
+        'mark.new': 'NEW',
+        'group.pickMark': 'Pick',
+        'region.cn': 'China region',
+        'region.intl': 'Global region',
+        'optional': 'optional',
+        'relay.updated': 'Relay updated',
+        'relay.added': 'Relay added',
+        'relay.keywordPlaceholder': 'checkin success',
+        'relay.testKeepToken': 'Test with the saved token',
       },
+    }
+
+    let activeDict = DICT.zh
+
+    function translate(key, vars) {
+      let text = activeDict[key] ?? DICT.en[key] ?? key
+      if (vars) for (const [name, value] of Object.entries(vars)) text = text.replaceAll(`{${name}}`, String(value))
+      return text
     }
 
     function activeLocale(ctx) {
@@ -328,12 +362,9 @@ window.__ModuleLoader__.load({
         }
       }, [])
       const table = DICT[localeId] || DICT.zh
+      activeDict = table
       return useCallback(
-        (key, vars) => {
-          let text = table[key] ?? DICT.en[key] ?? key
-          if (vars) for (const [name, value] of Object.entries(vars)) text = text.replaceAll(`{${name}}`, String(value))
-          return text
-        },
+        (key, vars) => translate(key, vars),
         [localeId],
       )
     }
@@ -360,7 +391,7 @@ window.__ModuleLoader__.load({
       }
       if (!response.ok) throw new Error(data.error || data.message || `HTTP ${response.status}`)
       if (data.ok === false && !opts.allowFail) {
-        throw new Error(data.error || data.message || data.result?.message || '请求失败')
+        throw new Error(data.error || data.message || data.result?.message || translate('common.requestFailed'))
       }
       return data
     }
@@ -723,7 +754,7 @@ window.__ModuleLoader__.load({
                           feed.ok === false
                             ? h('div', { className: 'ce-error' }, `${t('feed.failed')}：${feed.error || ''}`)
                             : feed.at
-                              ? h('div', { className: 'ce-hint' }, `${feed.count || 0} 条 · ${new Date(feed.at).toLocaleString()}`)
+                              ? h('div', { className: 'ce-hint' }, t('feed.summary', { n: feed.count || 0, time: new Date(feed.at).toLocaleString() }))
                               : null,
                         ),
                         h(
@@ -922,9 +953,9 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'ce-name-wrap' },
               h('span', { className: 'ce-name' }, source.name),
-              source.tier === 'hot' ? h('span', { className: 'ce-mark fire', title: '大家用得最多' }, '🔥') : null,
-              source.tier === 'pick' ? h('span', { className: 'ce-mark pick', title: '编辑推荐' }, '荐') : null,
-              source.fresh ? h('span', { className: 'ce-mark fresh' }, '新') : null,
+              source.tier === 'hot' ? h('span', { className: 'ce-mark fire', title: t('mark.hotTitle') }, '🔥') : null,
+              source.tier === 'pick' ? h('span', { className: 'ce-mark pick', title: t('mark.pickTitle') }, t('group.pickMark')) : null,
+              source.fresh ? h('span', { className: 'ce-mark fresh' }, t('mark.new')) : null,
             ),
             h(
               'div',
@@ -937,7 +968,7 @@ window.__ModuleLoader__.load({
           source.daily ? h('div', { className: 'ce-daily' }, `${t('daily')} ${source.daily}`) : h('div', { className: 'ce-daily' }, source.quota),
           h('div', { className: 'ce-row', style: { marginTop: 2 } },
             h('span', { className: accessClass }, accessText),
-            source.region === 'cn' ? h('span', { className: 'ce-pill' }, '国内节点') : h('span', { className: 'ce-pill' }, '海外节点'),
+            source.region === 'cn' ? h('span', { className: 'ce-pill' }, t('region.cn')) : h('span', { className: 'ce-pill' }, t('region.intl')),
           ),
           source.blurb ? h('div', { className: 'ce-blurb' }, source.blurb) : null,
           source.detail ? h('div', { className: 'ce-detail' }, source.detail) : null,
@@ -1025,7 +1056,7 @@ window.__ModuleLoader__.load({
 
       const groups = [
         { id: 'hot', title: t('group.hot'), mark: '🔥', items: sources.filter(source => source.tier === 'hot') },
-        { id: 'pick', title: t('group.pick'), mark: '荐', items: sources.filter(source => source.tier === 'pick') },
+        { id: 'pick', title: t('group.pick'), mark: t('group.pickMark'), items: sources.filter(source => source.tier === 'pick') },
         {
           id: 'more',
           title: t('group.more'),
@@ -1118,7 +1149,7 @@ window.__ModuleLoader__.load({
         setMessage(null)
         try {
           await api('/relay/save', form)
-          toast(form.id ? '中转站已更新' : '中转站已添加')
+          toast(form.id ? t('relay.updated') : t('relay.added'))
           setForm(EMPTY_FORM)
           setOpen(false)
           await refresh()
@@ -1279,7 +1310,7 @@ window.__ModuleLoader__.load({
                   onChange: event => setField('token', event.target.value),
                 })),
                 h(Field, { label: t('relay.userId') }, h('input', {
-                  className: 'ce-input', value: form.userId, placeholder: '可选',
+                  className: 'ce-input', value: form.userId, placeholder: t('optional'),
                   onChange: event => setField('userId', event.target.value),
                 })),
               ),
@@ -1318,7 +1349,7 @@ window.__ModuleLoader__.load({
                       onChange: event => setField('requestPath', event.target.value),
                     })),
                     h(Field, { label: t('relay.keyword') }, h('input', {
-                      className: 'ce-input', value: form.successKeyword, placeholder: '签到成功',
+                      className: 'ce-input', value: form.successKeyword, placeholder: t('relay.keywordPlaceholder'),
                       onChange: event => setField('successKeyword', event.target.value),
                     })),
                     h(Field, { label: t('relay.body') }, h('textarea', {
@@ -1351,7 +1382,7 @@ window.__ModuleLoader__.load({
                     type: 'button',
                     className: 'ce-btn',
                     disabled: busy !== '' || !form.baseURL || (!form.token && !form.id),
-                    title: !form.token && form.id ? '用已保存的口令测试' : undefined,
+                    title: !form.token && form.id ? t('relay.testKeepToken') : undefined,
                     onClick: test,
                   },
                   busy === 'test' ? h(Spinner) : null,
