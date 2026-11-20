@@ -165,6 +165,17 @@ window.__ModuleLoader__.load({
         'relay.added': '中转站已添加',
         'relay.keywordPlaceholder': '签到成功',
         'relay.testKeepToken': '用已保存的口令测试',
+        'anon.health': '体检可用性',
+        'anon.healthRunning': '逐个发「你好」…',
+        'anon.healthDone': '体检完成：{kept} 个能聊，移除 {removed} 个连不上的',
+        'anon.healthClean': '体检完成：{kept} 个全部能聊',
+        'anon.healthRate': '体检完成：{kept} 个能聊，{limited} 个被限流（保留）',
+        'anon.unblock': '恢复 {n} 个已屏蔽',
+        'anon.healthEmpty': '还没有启用匿名模型',
+        'anon.blocked': '已屏蔽 {n} 个连不上的',
+        'pollinations.title': 'Pollinations 免注册池',
+        'pollinations.note': '免 Key、免注册的公共接口；免费额度是每个 IP 每 45 秒 1 次，适合偶尔顶一下。',
+        'update.health': '更新后体检：{kept} 个能聊，移除 {removed} 个',
       },
       en: {
         'entry.label': 'Cyber eggs',
@@ -324,6 +335,17 @@ window.__ModuleLoader__.load({
         'relay.added': 'Relay added',
         'relay.keywordPlaceholder': 'checkin success',
         'relay.testKeepToken': 'Test with the saved token',
+        'anon.health': 'Check which models answer',
+        'anon.healthRunning': 'Saying hi to each model…',
+        'anon.healthDone': 'Check done: {kept} usable, {removed} unreachable removed',
+        'anon.healthClean': 'Check done: all {kept} answer',
+        'anon.healthRate': 'Check done: {kept} usable, {limited} throttled (kept)',
+        'anon.unblock': 'Unblock {n}',
+        'anon.healthEmpty': 'No anonymous model enabled yet',
+        'anon.blocked': '{n} unreachable blocked',
+        'pollinations.title': 'Pollinations no-signup pool',
+        'pollinations.note': 'Public no-key, no-signup endpoint; the free tier allows one reply per IP every 45 seconds.',
+        'update.health': 'Checked after update: {kept} usable, {removed} removed',
       },
     }
 
@@ -771,14 +793,14 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function AnonTab(props) {
-      const { t, kilo, busy, testing, onInstall, onTest, onDisable, onPrune } = props
-      const items = (kilo && kilo.items) || []
-      const installed = new Set((kilo && kilo.installed) || [])
-      const stale = (kilo && kilo.stale) || []
+    function AnonGroup(props) {
+      const { t, group, title, note, route, showTest, busy, testing, healthBusy, onInstall, onTest, onDisable, onPrune, onHealth } = props
+      const items = (group && group.items) || []
+      const installed = new Set((group && group.installed) || [])
+      const stale = (group && group.stale) || []
       return h(
         'div',
-        null,
+        { style: { marginTop: 14 } },
         h(
           'div',
           { className: 'ce-panel ce-radar' },
@@ -788,18 +810,26 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { style: { minWidth: 0 } },
-              h('div', { className: 'ce-panel-title', style: { margin: 0 } }, t('anon.title')),
-              h('div', { className: 'ce-hint' }, t('anon.note')),
+              h('div', { className: 'ce-panel-title', style: { margin: 0 } }, title),
+              h('div', { className: 'ce-hint' }, note),
             ),
             h(
               'div',
               { className: 'ce-row' },
               h(
                 'button',
-                { type: 'button', className: 'ce-btn', disabled: testing || installed.size === 0, onClick: onTest },
-                testing ? h(Spinner) : null,
-                testing ? t('anon.testing') : t('anon.test'),
+                { type: 'button', className: 'ce-btn', disabled: healthBusy || installed.size === 0, onClick: onHealth, title: t('anon.health') },
+                healthBusy ? h(Spinner) : null,
+                healthBusy ? t('anon.healthRunning') : t('anon.health'),
               ),
+              showTest
+                ? h(
+                    'button',
+                    { type: 'button', className: 'ce-btn', disabled: testing || installed.size === 0, onClick: onTest },
+                    testing ? h(Spinner) : null,
+                    testing ? t('anon.testing') : t('anon.test'),
+                  )
+                : null,
               h(
                 'button',
                 { type: 'button', className: 'ce-btn primary', disabled: busy || !items.length, onClick: () => onInstall({ all: true }) },
@@ -807,11 +837,7 @@ window.__ModuleLoader__.load({
                 t('anon.enableAll'),
               ),
               installed.size
-                ? h(
-                    'button',
-                    { type: 'button', className: 'ce-btn ghost', disabled: busy, onClick: onDisable },
-                    t('anon.disable'),
-                  )
+                ? h('button', { type: 'button', className: 'ce-btn ghost', disabled: busy, onClick: onDisable }, t('anon.disable'))
                 : null,
               stale.length
                 ? h(
@@ -828,9 +854,9 @@ window.__ModuleLoader__.load({
             h('span', { className: 'ce-badge ok' }, t('anon.count', { n: items.length })),
             installed.size ? h('span', { className: 'ce-badge ok' }, t('anon.enabled', { n: installed.size })) : null,
             stale.length ? h('span', { className: 'ce-badge' }, t('anon.stale', { n: stale.length })) : null,
-            h('span', { className: 'ce-hint' }, t('anon.route', { route: 'kilo-free' })),
+            h('span', { className: 'ce-hint' }, t('anon.route', { route })),
           ),
-          kilo && kilo.error ? h('div', { className: 'ce-error', role: 'alert', style: { marginTop: 8 } }, kilo.error) : null,
+          group && group.error ? h('div', { className: 'ce-error', role: 'alert', style: { marginTop: 8 } }, group.error) : null,
         ),
         items.length
           ? h(
@@ -861,6 +887,7 @@ window.__ModuleLoader__.load({
                     { className: 'ce-row' },
                     h('span', { className: 'ce-pill' }, item.vendor),
                     item.context ? h('span', { className: 'ce-pill' }, `${Math.round(item.context / 1000)}K`) : null,
+                    item.note ? h('span', { className: 'ce-pill' }, item.note) : null,
                   ),
                   h(
                     'div',
@@ -880,6 +907,57 @@ window.__ModuleLoader__.load({
               ),
             )
           : h('div', { className: 'ce-empty', style: { marginTop: 14 } }, t('loading')),
+      )
+    }
+
+    function AnonTab(props) {
+      const { t, kilo, pollinations, anon, busy, testing, healthBusy, kiloActions, pollinationsActions, onUnblock } = props
+      const blocked = (anon && anon.blocked) || []
+      return h(
+        'div',
+        null,
+        blocked.length
+          ? h(
+              'div',
+              { className: 'ce-row', style: { marginTop: 10 } },
+              h('span', { className: 'ce-hint', style: { flex: 1, minWidth: 0 }, title: blocked.join(', ') }, t('anon.blocked', { n: blocked.length })),
+              h('button', { type: 'button', className: 'ce-btn ghost', onClick: onUnblock }, t('anon.unblock', { n: blocked.length })),
+            )
+          : null,
+        h(
+          AnonGroup,
+          Object.assign(
+            {
+              t,
+              group: kilo,
+              title: t('anon.title'),
+              note: t('anon.note'),
+              route: 'kilo-free',
+              showTest: true,
+              busy,
+              testing,
+              healthBusy,
+            },
+            kiloActions || {},
+          ),
+        ),
+        h(
+          AnonGroup,
+          Object.assign(
+            {
+              t,
+              group: pollinations,
+              title: t('pollinations.title'),
+              note: t('pollinations.note'),
+              route: 'pollinations-free',
+              showTest: false,
+              busy,
+              testing: false,
+              healthBusy,
+            },
+            pollinationsActions || {},
+          ),
+        ),
       )
     }
 
@@ -1583,6 +1661,7 @@ window.__ModuleLoader__.load({
       const [refreshing, setRefreshing] = useState(false)
       const [kiloBusy, setKiloBusy] = useState(false)
       const [kiloTesting, setKiloTesting] = useState(false)
+      const [healthBusy, setHealthBusy] = useState(false)
       const [updateInfo, setUpdateInfo] = useState(null)
       const [updateBusy, setUpdateBusy] = useState('')
       const [error, setError] = useState('')
@@ -1652,6 +1731,15 @@ window.__ModuleLoader__.load({
           } else {
             toast(t('update.done', { v: result.to }), 'ok')
           }
+          if (result.ok && !result.upToDate) {
+            try {
+              const health = await api('/anon/health', { prune: true }, { allowFail: true })
+              if (health.state) setData(health.state)
+              if (health.checked) toast(t('update.health', { kept: health.kept.length, removed: health.removed }), 'ok')
+            } catch {
+              /* keep the update result even if the health pass fails */
+            }
+          }
           setUpdateInfo(null)
         } catch (caught) {
           toast(`${t('update.failed')}：${String(caught?.message || t('unknownError'))}`, 'bad')
@@ -1664,9 +1752,15 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (!data || kiloEnsured.current) return
         kiloEnsured.current = true
-        const count = ((data.kilo && data.kilo.items) || []).length
-        if (count === 0) {
+        if (((data.kilo && data.kilo.items) || []).length === 0) {
           api('/kilo/models', { force: false })
+            .then(result => {
+              if (result.state) setData(result.state)
+            })
+            .catch(() => {})
+        }
+        if (((data.pollinations && data.pollinations.items) || []).length === 0) {
+          api('/pollinations/models', { force: true })
             .then(result => {
               if (result.state) setData(result.state)
             })
@@ -1730,6 +1824,74 @@ window.__ModuleLoader__.load({
           toast(String(caught?.message || t('unknownError')), 'bad')
         } finally {
           setKiloBusy(false)
+        }
+      }, [t])
+
+      const pollinationsInstall = useCallback(
+        async payload => {
+          setKiloBusy(true)
+          try {
+            const result = await api('/pollinations/install', payload)
+            if (result.state) setData(result.state)
+            const count = Array.isArray(result.installed) ? result.installed.length : 0
+            toast(t('anon.enabled', { n: count }), 'ok')
+          } catch (caught) {
+            toast(`${t('anon.fail')}：${String(caught?.message || t('unknownError'))}`, 'bad')
+          } finally {
+            setKiloBusy(false)
+          }
+        },
+        [t],
+      )
+
+      const pollinationsDisable = useCallback(async () => {
+        setKiloBusy(true)
+        try {
+          const result = await api('/pollinations/uninstall', {})
+          if (result.state) setData(result.state)
+          toast(t('anon.disabled'), 'ok')
+        } catch (caught) {
+          toast(String(caught?.message || t('unknownError')), 'bad')
+        } finally {
+          setKiloBusy(false)
+        }
+      }, [t])
+
+      const anonHealth = useCallback(async () => {
+        setHealthBusy(true)
+        try {
+          const result = await api('/anon/health', { prune: true }, { allowFail: true })
+          if (result.state) setData(result.state)
+          const kept = (result.kept || []).length
+          const limited = (result.rateLimited || []).length
+          if (!result.checked) toast(t('anon.healthEmpty'), 'ok')
+          else if (result.removed) toast(t('anon.healthDone', { kept, removed: result.removed }), 'ok')
+          else if (limited) toast(t('anon.healthRate', { kept, limited }), 'ok')
+          else toast(t('anon.healthClean', { kept }), 'ok')
+          return result
+        } catch (caught) {
+          toast(`${t('anon.fail')}：${String(caught?.message || t('unknownError'))}`, 'bad')
+          return null
+        } finally {
+          setHealthBusy(false)
+        }
+      }, [t])
+
+      const anonUnblock = useCallback(async () => {
+        try {
+          const result = await api('/anon/unblock', {})
+          if (result.state) setData(result.state)
+          for (const path of ['/kilo/models', '/pollinations/models']) {
+            try {
+              const list = await api(path, { force: true })
+              if (list.state) setData(list.state)
+            } catch {
+              /* the pool list will refresh on its own */
+            }
+          }
+          toast(t('anon.unblock', { n: result.unblocked || 0 }), 'ok')
+        } catch (caught) {
+          toast(String(caught?.message || t('unknownError')), 'bad')
         }
       }, [t])
 
@@ -1876,12 +2038,25 @@ window.__ModuleLoader__.load({
                     h(AnonTab, {
                       t,
                       kilo: data?.kilo || null,
+                      pollinations: data?.pollinations || null,
+                      anon: data?.anon || null,
                       busy: kiloBusy,
                       testing: kiloTesting,
-                      onInstall: kiloInstall,
-                      onTest: kiloTest,
-                      onDisable: kiloDisable,
-                      onPrune: () => kiloInstall({ all: true, prune: true }),
+                      healthBusy,
+                      onUnblock: anonUnblock,
+                      kiloActions: {
+                        onInstall: kiloInstall,
+                        onTest: kiloTest,
+                        onDisable: kiloDisable,
+                        onPrune: () => kiloInstall({ all: true, prune: true }),
+                        onHealth: anonHealth,
+                      },
+                      pollinationsActions: {
+                        onInstall: pollinationsInstall,
+                        onDisable: pollinationsDisable,
+                        onPrune: () => pollinationsInstall({ all: true, prune: true }),
+                        onHealth: anonHealth,
+                      },
                     })),
                   h('div', { style: { display: tab === 'relay' ? 'block' : 'none' } },
                     h(RelayTab, { t, relays, protocols: data?.protocols || [], refresh, toast, claims, onGoto: setTab })),
