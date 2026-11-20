@@ -1066,7 +1066,7 @@ function snapshot(ctx, state) {
   })()
   return {
     ok: true,
-    build: '1.4.1',
+    build: '1.4.2',
     sources: [...catalog.map(decorate), ...(state.feedSources || []).map(decorate)],
     accessLabels,
     radar: state.radar || null,
