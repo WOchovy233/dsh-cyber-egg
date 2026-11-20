@@ -1066,7 +1066,7 @@ function snapshot(ctx, state) {
   })()
   return {
     ok: true,
-    build: '1.4.0',
+    build: '1.4.1',
     sources: [...catalog.map(decorate), ...(state.feedSources || []).map(decorate)],
     accessLabels,
     radar: state.radar || null,
@@ -1174,7 +1174,7 @@ async function checkUpdate(state, config) {
   }
 }
 
-async function downloadUpdate(url, sha256) {
+async function downloadUpdate(url, sha256, version) {
   if (!/^https?:\/\//i.test(url)) throw new Error('更新包地址无效')
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 120000)
@@ -1191,9 +1191,12 @@ async function downloadUpdate(url, sha256) {
       const actual = crypto.createHash('sha256').update(buffer).digest('hex')
       if (actual.toLowerCase() !== sha256.toLowerCase()) throw new Error('sha256 校验失败，已中止安装')
     }
-    const dir = path.join(os.tmpdir(), 'cyber-egg-update')
+    // Keep the tarball: the profile dependency records this path, so a temp
+    // directory would leave it dangling after the OS cleans up.
+    const dir = path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), NAME, 'packages')
     fs.mkdirSync(dir, { recursive: true })
-    const file = path.join(dir, `cyber-egg-${Date.now()}.tgz`)
+    const label = String(version || Date.now()).replace(/[^0-9A-Za-z._-]/g, '_')
+    const file = path.join(dir, `cyber-egg-${label}.tgz`)
     fs.writeFileSync(file, buffer)
     return { file, bytes: buffer.length, sha256: sha256 || crypto.createHash('sha256').update(buffer).digest('hex') }
   } finally {
@@ -1224,7 +1227,7 @@ async function installUpdate(ctx, state, body, config) {
   let downloaded = null
   for (const candidate of candidates) {
     try {
-      downloaded = await downloadUpdate(candidate, sha256)
+      downloaded = await downloadUpdate(candidate, sha256, latest)
       break
     } catch (error) {
       failures.push(`${candidate}: ${describeNetworkError(error, 120000)}`)
