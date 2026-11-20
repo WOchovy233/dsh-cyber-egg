@@ -177,6 +177,8 @@ window.__ModuleLoader__.load({
         'pollinations.title': 'Pollinations 免注册池',
         'pollinations.note': '免 Key、免注册的公共接口；免费额度是每个 IP 每 45 秒 1 次，适合偶尔顶一下。',
         'update.health': '更新后体检：{kept} 个能聊，移除 {removed} 个',
+        'update.signed': '清单已验签',
+        'update.badSignature': '更新清单未通过签名校验，已拒绝安装。请到 Release 页面手动下载安装包。',
       },
       en: {
         'entry.label': 'Cyber eggs',
@@ -348,6 +350,8 @@ window.__ModuleLoader__.load({
         'pollinations.title': 'Pollinations no-signup pool',
         'pollinations.note': 'Public no-key, no-signup endpoint; the free tier allows one reply per IP every 45 seconds.',
         'update.health': 'Checked after update: {kept} usable, {removed} removed',
+        'update.signed': 'manifest signed',
+        'update.badSignature': 'The update manifest failed signature verification, so the install was refused. Download the package manually from the Release page.',
       },
     }
 
@@ -1705,7 +1709,7 @@ window.__ModuleLoader__.load({
             const result = await api('/update/check', {}, { allowFail: true })
             setUpdateInfo(result)
             if (manual) {
-              if (!result.ok) toast(`${t('update.failed')}：${result.error || ''}`, 'bad')
+              if (!result.ok) toast(result.signedRequired ? t('update.badSignature') : `${t('update.failed')}：${result.error || ''}`, 'bad')
               else if (result.newer) toast(t('update.available', { v: result.latest }), 'ok')
               else toast(t('update.latest', { v: result.current || result.latest }), 'ok')
             }
@@ -1760,7 +1764,8 @@ window.__ModuleLoader__.load({
           }
           setUpdateInfo(null)
         } catch (caught) {
-          toast(`${t('update.failed')}：${String(caught?.message || t('unknownError'))}`, 'bad')
+          const message = String(caught?.message || t('unknownError'))
+          toast(/签名/.test(message) ? t('update.badSignature') : `${t('update.failed')}：${message}`, 'bad')
         } finally {
           setUpdateBusy('')
         }
