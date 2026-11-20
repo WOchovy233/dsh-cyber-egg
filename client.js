@@ -1703,7 +1703,7 @@ window.__ModuleLoader__.load({
             if (manual) {
               if (!result.ok) toast(`${t('update.failed')}：${result.error || ''}`, 'bad')
               else if (result.newer) toast(t('update.available', { v: result.latest }), 'ok')
-              else toast(t('update.latest', { v: result.latest }), 'ok')
+              else toast(t('update.latest', { v: result.current || result.latest }), 'ok')
             }
           } catch (caught) {
             if (manual) toast(`${t('update.failed')}：${String(caught?.message || t('unknownError'))}`, 'bad')
@@ -1974,7 +1974,7 @@ window.__ModuleLoader__.load({
                       : updateInfo && updateInfo.ok && updateInfo.newer
                         ? t('update.available', { v: updateInfo.latest })
                         : updateInfo && updateInfo.ok
-                          ? t('update.latest', { v: updateInfo.latest })
+                          ? t('update.latest', { v: updateInfo.current || updateInfo.latest })
                           : t('update.check'),
                 ),
                 h(
