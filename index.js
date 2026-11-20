@@ -11,7 +11,7 @@ const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
 // Keep in sync with package.json; the update check falls back to this when the
 // loader gives us an entry URL that does not sit next to package.json.
-const PLUGIN_VERSION = '1.5.1'
+const PLUGIN_VERSION = '1.5.5'
 
 /**
  * Release signing key (Ed25519, public half). The private half lives outside the
@@ -57,6 +57,18 @@ function emptyState() {
     feedSources: [],
     feedNewIds: [],
     feedSeenIds: [],
+    officialCatalog: {
+      at: null,
+      version: null,
+      updatedAt: null,
+      sources: [],
+      accessLabels: {},
+      source: null,
+      error: null,
+      lastAttemptAt: null,
+    },
+    officialNewIds: [],
+    officialSeenIds: catalog.map(source => source.id),
   }
 }
 
@@ -84,6 +96,19 @@ function loadState() {
         feedSources: Array.isArray(parsed.feedSources) ? parsed.feedSources : [],
         feedNewIds: Array.isArray(parsed.feedNewIds) ? parsed.feedNewIds : [],
         feedSeenIds: Array.isArray(parsed.feedSeenIds) ? parsed.feedSeenIds : [],
+        officialCatalog: {
+          ...base.officialCatalog,
+          ...(parsed.officialCatalog && typeof parsed.officialCatalog === 'object' ? parsed.officialCatalog : {}),
+          sources: Array.isArray(parsed.officialCatalog?.sources) ? parsed.officialCatalog.sources : [],
+          accessLabels:
+            parsed.officialCatalog && typeof parsed.officialCatalog.accessLabels === 'object'
+              ? parsed.officialCatalog.accessLabels
+              : {},
+        },
+        officialNewIds: Array.isArray(parsed.officialNewIds) ? parsed.officialNewIds : [],
+        officialSeenIds: Array.isArray(parsed.officialSeenIds)
+          ? parsed.officialSeenIds
+          : catalog.map(source => source.id),
       }
     } catch {
       /* try the next location */
@@ -318,32 +343,190 @@ async function refreshRadar(state) {
   }
 }
 
-function sanitiseFeedSource(raw) {
+const SOURCE_TIERS = new Set(['hot', 'pick', 'more'])
+const SOURCE_APIS = new Set(['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai'])
+const SOURCE_ACCESS = new Set(['cn-direct', 'cn-vpn', 'cn-card'])
+
+function fieldText(value, limit) {
+  return (typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value)).trim().slice(0, limit)
+}
+
+function fieldUrl(value, limit = 300) {
+  const text = fieldText(value, limit)
+  if (!text) return ''
+  try {
+    return cleanBase(text).slice(0, limit)
+  } catch {
+    return ''
+  }
+}
+
+function sanitiseSource(raw, { official = false } = {}) {
   if (!raw || typeof raw !== 'object') return null
-  const id = String(raw.id || '').trim()
-  const baseURL = String(raw.baseURL || '').trim()
+  const id = fieldText(raw.id, 80)
+  const baseURL = fieldUrl(raw.baseURL)
   if (!id || !baseURL) return null
-  const api = ['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai'].includes(raw.api)
-    ? raw.api
-    : 'openai-completions'
+  const tier = official && SOURCE_TIERS.has(raw.tier) ? raw.tier : official ? 'more' : 'feed'
+  const name = fieldText(raw.name, 80) || id
+  const blurb = fieldText(raw.blurb, 200)
   return {
     id: /^[a-z0-9][a-z0-9-]{1,40}$/.test(id) ? id : `feed-${Buffer.from(id).toString('hex').slice(0, 10)}`,
-    tier: 'feed',
-    name: String(raw.name || id),
-    vendor: String(raw.vendor || raw.name || id),
+    tier,
+    name,
+    vendor: fieldText(raw.vendor, 80) || name,
     region: raw.region === 'cn' ? 'cn' : 'global',
-    tag: String(raw.tag || '订阅源'),
-    daily: String(raw.daily || '')
-      .slice(0, 80),
-    dailyNote: String(raw.dailyNote || '').slice(0, 160),
-    access: ['cn-direct', 'cn-vpn', 'cn-card'].includes(raw.access) ? raw.access : 'cn-vpn',
-    quota: String(raw.quota || '').slice(0, 80),
-    blurb: String(raw.blurb || '').slice(0, 200),
-    detail: String(raw.detail || raw.blurb || '').slice(0, 400),
-    signupUrl: String(raw.signupUrl || '').slice(0, 300),
-    api,
-    baseURL: baseURL.slice(0, 300),
-    keyHint: String(raw.keyHint || '').slice(0, 60),
+    tag: fieldText(raw.tag, 40) || (official ? '官方精选' : '订阅源'),
+    daily: fieldText(raw.daily, 80),
+    dailyNote: fieldText(raw.dailyNote, 160),
+    access: SOURCE_ACCESS.has(raw.access) ? raw.access : 'cn-vpn',
+    quota: fieldText(raw.quota, 80),
+    blurb,
+    detail: fieldText(raw.detail, 400) || blurb,
+    signupUrl: fieldUrl(raw.signupUrl, 300),
+    api: SOURCE_APIS.has(raw.api) ? raw.api : 'openai-completions',
+    baseURL,
+    keyHint: fieldText(raw.keyHint, 60),
+  }
+}
+
+function sanitiseFeedSource(raw) {
+  return sanitiseSource(raw, { official: false })
+}
+
+/* ------------------------------------------------ official source catalogue */
+
+const CATALOG_SCHEMA = 1
+
+/** Canonical source fields covered by the official-catalogue signature. */
+function catalogSourcePayload(raw) {
+  return {
+    id: fieldText(raw?.id, 80),
+    tier: fieldText(raw?.tier, 20),
+    name: fieldText(raw?.name, 80),
+    vendor: fieldText(raw?.vendor, 80),
+    region: fieldText(raw?.region, 20),
+    tag: fieldText(raw?.tag, 40),
+    daily: fieldText(raw?.daily, 80),
+    dailyNote: fieldText(raw?.dailyNote, 160),
+    access: fieldText(raw?.access, 20),
+    quota: fieldText(raw?.quota, 80),
+    blurb: fieldText(raw?.blurb, 200),
+    detail: fieldText(raw?.detail, 400),
+    signupUrl: fieldText(raw?.signupUrl, 300),
+    api: fieldText(raw?.api, 60),
+    baseURL: fieldText(raw?.baseURL, 300),
+    keyHint: fieldText(raw?.keyHint, 60),
+  }
+}
+
+function catalogPayload(doc) {
+  const labels = doc?.accessLabels && typeof doc.accessLabels === 'object' ? doc.accessLabels : {}
+  return Buffer.from(
+    JSON.stringify({
+      schema: Number(doc?.schema || CATALOG_SCHEMA),
+      version: String(doc?.version || ''),
+      updatedAt: String(doc?.updatedAt || ''),
+      sources: (Array.isArray(doc?.sources) ? doc.sources : []).map(catalogSourcePayload),
+      accessLabels: Object.keys(labels)
+        .sort()
+        .map(key => [String(key), String(labels[key] ?? '')]),
+    }),
+    'utf8',
+  )
+}
+
+function catalogFields(doc) {
+  if (Number(doc?.schema || CATALOG_SCHEMA) !== CATALOG_SCHEMA) throw new Error('官方源清单版本不受支持')
+  const version = String(doc?.version || '').trim()
+  const updatedAt = String(doc?.updatedAt || '').trim()
+  if (!version) throw new Error('官方源清单缺少 version')
+  if (!updatedAt) throw new Error('官方源清单缺少 updatedAt')
+  const rows = Array.isArray(doc?.sources) ? doc.sources.slice(0, 200) : []
+  const sources = rows.map(row => sanitiseSource(row, { official: true })).filter(Boolean)
+  if (!sources.length) throw new Error('官方源清单没有有效来源')
+  const accessLabels = {}
+  if (doc?.accessLabels && typeof doc.accessLabels === 'object') {
+    for (const [key, value] of Object.entries(doc.accessLabels).slice(0, 30)) {
+      accessLabels[String(key).slice(0, 40)] = String(value ?? '').slice(0, 80)
+    }
+  }
+  return { version, updatedAt, sources, accessLabels }
+}
+
+function verifyOfficialCatalog(doc) {
+  const signature = String(doc?.signature || '').trim()
+  if (!signature) throw new Error('官方源清单缺少签名')
+  let verified = false
+  try {
+    verified = crypto.verify(
+      null,
+      catalogPayload(doc),
+      crypto.createPublicKey(UPDATE_PUBLIC_KEY),
+      Buffer.from(signature, 'base64'),
+    )
+  } catch (error) {
+    throw new Error(`官方源清单签名校验失败：${error?.message || error}`)
+  }
+  if (!verified) throw new Error('官方源清单签名校验失败（可能被篡改或镜像投毒）')
+  return catalogFields(doc)
+}
+
+async function refreshOfficialCatalog(state, config, fetchText = getText) {
+  const channel = updateChannel(config, state)
+  const urls = officialCatalogUrls(channel).map(withCacheBust)
+  const reasons = []
+  let chosen = null
+  // Priority order matters: the release asset is freshest, then git/raw mirrors.
+  // Each request is cache-busted because this only runs on an explicit refresh.
+  for (const url of urls) {
+    try {
+      const text = await fetchText(url, 10000)
+      let doc = null
+      try {
+        doc = JSON.parse(text)
+      } catch {
+        throw new Error('官方源清单不是合法 JSON')
+      }
+      chosen = { url, fields: verifyOfficialCatalog(doc) }
+      break
+    } catch (error) {
+      reasons.push(String(error?.message || error || '未知错误'))
+    }
+  }
+  if (!chosen) {
+    const message = reasons.find(item => /签名|JSON|版本|缺少/.test(item)) || reasons[0] || '没有可用的官方源清单'
+    state.officialCatalog = {
+      ...(state.officialCatalog || {}),
+      error: message,
+      lastAttemptAt: new Date().toISOString(),
+    }
+    return { ok: false, error: message, fromCache: Boolean(state.officialCatalog?.sources?.length) }
+  }
+  const { url, fields } = chosen
+  const seen = new Set(
+    state.officialSeenIds?.length ? state.officialSeenIds : sourcePool(state).map(source => source.id),
+  )
+  const newIds = fields.sources.map(source => source.id).filter(id => !seen.has(id))
+  state.officialCatalog = {
+    at: new Date().toISOString(),
+    version: fields.version,
+    updatedAt: fields.updatedAt,
+    sources: fields.sources,
+    accessLabels: fields.accessLabels,
+    source: url.split('?')[0],
+    error: null,
+    lastAttemptAt: new Date().toISOString(),
+  }
+  state.officialNewIds = newIds
+  state.officialSeenIds = [...new Set([...seen, ...fields.sources.map(source => source.id)])]
+  return {
+    ok: true,
+    version: fields.version,
+    updatedAt: fields.updatedAt,
+    count: fields.sources.length,
+    newCount: newIds.length,
+    source: state.officialCatalog.source,
+    fromCache: false,
   }
 }
 
@@ -389,15 +572,25 @@ async function refreshFeeds(state) {
   return results
 }
 
-async function refreshAll(state, force = true) {
-  const [radar, feeds] = await Promise.all([refreshRadar(state), refreshFeeds(state)])
+async function refreshAll(ctx, state, force = true, config = {}) {
+  const [radar, feeds, officialCatalog] = await Promise.all([
+    refreshRadar(state),
+    refreshFeeds(state),
+    refreshOfficialCatalog(state, config).catch(error => ({
+      ok: false,
+      error: error?.message || String(error),
+    })),
+  ])
   await refreshKilo(state, force)
   await refreshPollinations(state, force)
   await refreshLlm7(state, force)
+  const installedRoutes = await syncInstalledSources(ctx, state)
   saveState(state)
   return {
     radar,
     feeds,
+    officialCatalog,
+    installedRoutes,
     kilo: { ok: !state.kilo?.error, count: state.kilo?.items?.length || 0 },
     pollinations: { ok: !state.pollinations?.error, count: state.pollinations?.items?.length || 0 },
     llm7: { ok: !state.llm7?.error, count: state.llm7?.items?.length || 0 },
@@ -1044,8 +1237,15 @@ async function healthCheckAnon(ctx, state, options) {
 
 
 
+function officialSources(state) {
+  const remote = state.officialCatalog?.sources
+  return Array.isArray(remote) && remote.length ? remote : catalog
+}
+
 function sourcePool(state) {
-  return [...catalog, ...(state.feedSources || [])]
+  const official = officialSources(state)
+  const ids = new Set(official.map(source => source.id))
+  return [...official, ...(state.feedSources || []).filter(source => !ids.has(source.id))]
 }
 
 function findSource(state, id) {
@@ -1167,11 +1367,14 @@ async function installSource(ctx, state, body) {
     throw new Error(`写入模型配置失败：${error?.message || error}`)
   }
   state.installed[source.id] = {
+    name: source.name,
     routeId,
     baseURL: source.baseURL,
     api: source.api,
     models: models.map(model => model.id),
     at: new Date().toISOString(),
+    syncedAt: null,
+    syncError: null,
   }
   saveState(state)
   let registered = false
@@ -1204,6 +1407,156 @@ async function uninstallSource(ctx, state, body) {
   delete state.installed[sourceId]
   saveState(state)
   return { ok: true }
+}
+
+/* ---------------------------------------------- installed route refresh */
+
+/**
+ * Re-discover models for every installed egg route. A successful upstream model
+ * list replaces the route model array, so delisted models disappear; a failed
+ * discovery keeps the last known-good route untouched.
+ */
+async function syncInstalledSources(ctx, state) {
+  const entries = Object.entries(state.installed || {})
+  const summary = { checked: entries.length, updated: 0, unchanged: 0, removedModels: 0, failed: [] }
+  if (!entries.length) return summary
+
+  const settings = ctx.get('settings')
+  const llm = ctx.get('llm')
+  const credentials = ctx.get('credentials')
+  if (!settings || !llm) {
+    const error = !settings ? 'settings 服务不可用' : 'llm 服务不可用'
+    for (const [sourceId, record] of entries) {
+      record.syncError = error
+      summary.failed.push({ sourceId, error })
+    }
+    return summary
+  }
+
+  let descriptor
+  try {
+    descriptor = providerDescriptor(settings)
+  } catch (error) {
+    const message = error?.message || String(error)
+    for (const [sourceId, record] of entries) {
+      record.syncError = message
+      summary.failed.push({ sourceId, error: message })
+    }
+    return summary
+  }
+
+  const sources = sourcePool(state)
+  const providers = descriptor.value?.providers || {}
+  const pendingChanges = []
+  const cleanRecords = []
+
+  for (const [sourceId, record] of entries) {
+    const source = sources.find(item => item.id === sourceId) || null
+    const routeId = String(record.routeId || `egg-${sourceId}`)
+    const baseURL = source?.baseURL || record.baseURL
+    const api = source?.api || record.api || 'openai-completions'
+    const sourceName = source?.name || record.name || routeId
+    const existing = providers[routeId] || {}
+    const credentialRef = existing.apiKeyEnv || ROUTE_REF(routeId)
+    if (!baseURL) {
+      record.syncError = '来源没有可用的 baseURL'
+      summary.failed.push({ sourceId, error: record.syncError })
+      continue
+    }
+
+    let apiKey = ''
+    try {
+      const resolved = credentials ? await credentials.resolve(credentialRef) : null
+      apiKey = String(resolved?.value ?? resolved ?? '').trim()
+    } catch (error) {
+      record.syncError = `读取 API Key 失败：${error?.message || error}`
+      summary.failed.push({ sourceId, error: record.syncError })
+      continue
+    }
+    if (!apiKey) {
+      record.syncError = 'API Key 不在凭据库里，已保留旧模型列表'
+      summary.failed.push({ sourceId, error: record.syncError })
+      continue
+    }
+
+    let discovered = []
+    try {
+      discovered = await llm.discoverModels(descriptor.ns, { baseURL, api, apiKey })
+    } catch (error) {
+      record.syncError = `模型列表刷新失败（保留旧列表）：${error?.message || error}`
+      summary.failed.push({ sourceId, error: record.syncError })
+      continue
+    }
+    const models = pickModels(discovered)
+    if (!models.length) {
+      record.syncError = '上游没有返回可用模型，已保留旧列表'
+      summary.failed.push({ sourceId, error: record.syncError })
+      continue
+    }
+
+    const nextIds = models.map(model => model.id)
+    const previousModels = Array.isArray(existing.models)
+      ? existing.models.map(model => (typeof model === 'string' ? model : model?.id)).filter(Boolean)
+      : Array.isArray(record.models)
+        ? record.models
+        : []
+    const displayName = existing.displayName || `${sourceName} · 赛博鸡蛋`
+    const nextProfile = {
+      ...existing,
+      displayName,
+      api,
+      baseURL,
+      apiKeyEnv: existing.apiKeyEnv || credentialRef,
+      models,
+    }
+    const changed =
+      JSON.stringify(previousModels) !== JSON.stringify(nextIds) ||
+      existing.api !== api ||
+      existing.baseURL !== baseURL ||
+      existing.displayName !== displayName
+    const nextRecord = {
+      ...record,
+      name: sourceName,
+      routeId,
+      baseURL,
+      api,
+      models: nextIds,
+      syncedAt: new Date().toISOString(),
+      syncError: null,
+    }
+    if (changed) {
+      pendingChanges.push({
+        sourceId,
+        record: nextRecord,
+        op: { op: 'set', path: ['providers', routeId], value: nextProfile },
+        removed: previousModels.filter(id => !nextIds.includes(id)).length,
+      })
+    } else {
+      cleanRecords.push({ sourceId, record: nextRecord })
+    }
+  }
+
+  if (pendingChanges.length) {
+    try {
+      await settings.mutate(descriptor.ns, pendingChanges.map(item => item.op), descriptor.revision)
+      for (const item of pendingChanges) {
+        state.installed[item.sourceId] = item.record
+        summary.updated += 1
+        summary.removedModels += item.removed
+      }
+    } catch (error) {
+      const message = `写入模型配置失败（保留旧路由）：${error?.message || error}`
+      for (const item of pendingChanges) {
+        state.installed[item.sourceId].syncError = message
+        summary.failed.push({ sourceId: item.sourceId, error: message })
+      }
+    }
+  }
+  for (const item of cleanRecords) {
+    state.installed[item.sourceId] = item.record
+    summary.unchanged += 1
+  }
+  return summary
 }
 
 /* ----------------------------------------------------------------- relays */
@@ -1498,7 +1851,8 @@ function snapshot(ctx, state) {
     installed: Boolean(installed[source.id]),
     routeId: installed[source.id]?.routeId || null,
     modelCount: installed[source.id]?.models?.length || 0,
-    fresh: (state.feedNewIds || []).includes(source.id),
+    fresh:
+      (state.officialNewIds || []).includes(source.id) || (state.feedNewIds || []).includes(source.id),
   })
   const descriptor = (() => {
     try {
@@ -1518,8 +1872,17 @@ function snapshot(ctx, state) {
   return {
     ok: true,
     build: PLUGIN_VERSION,
-    sources: [...catalog.map(decorate), ...(state.feedSources || []).map(decorate)],
-    accessLabels,
+    sources: sourcePool(state).map(decorate),
+    accessLabels: { ...accessLabels, ...(state.officialCatalog?.accessLabels || {}) },
+    officialCatalog: {
+      at: state.officialCatalog?.at || null,
+      version: state.officialCatalog?.version || null,
+      updatedAt: state.officialCatalog?.updatedAt || null,
+      source: state.officialCatalog?.source || null,
+      error: state.officialCatalog?.error || null,
+      count: officialSources(state).length,
+      cached: Boolean(state.officialCatalog?.sources?.length),
+    },
     radar: state.radar || null,
     kilo: {
       at: state.kilo?.at || null,
@@ -1589,6 +1952,17 @@ function updateUrls(channel) {
     `https://raw.githubusercontent.com/${base}/${channel.branch}/update.json`,
     `https://github.com/${base}/raw/${channel.branch}/update.json`,
     `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/update.json`,
+  ]
+}
+
+function officialCatalogUrls(channel) {
+  const base = `${channel.owner}/${channel.repo}`
+  // The signed JSON is its own proof, so mirrors only affect availability, not trust.
+  return [
+    `https://github.com/${base}/releases/latest/download/catalog.json`,
+    `https://raw.githubusercontent.com/${base}/${channel.branch}/catalog.json`,
+    `https://github.com/${base}/raw/${channel.branch}/catalog.json`,
+    `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/catalog.json`,
   ]
 }
 
@@ -1938,8 +2312,9 @@ function registerTool(ctx, state, handlers) {
       const action = String(args?.action || '')
       if (action === 'list') {
         const marks = { hot: '🔥', pick: '[荐]', feed: '[订阅]' }
+        const labelMap = { ...accessLabels, ...(state.officialCatalog?.accessLabels || {}) }
         const lines = sourcePool(state).map(source => {
-          const access = accessLabels[source.access] || source.access || ''
+          const access = labelMap[source.access] || source.access || ''
           return `- ${marks[source.tier] ? `${marks[source.tier]} ` : ''}${source.id} · ${source.name} — ${source.daily || source.quota || ''}；${access}；注册 ${source.signupUrl}`
         })
         return toolResult(`免费 token 来源：\n${lines.join('\n')}`)
@@ -1981,9 +2356,13 @@ function registerTool(ctx, state, handlers) {
         const outcome = await handlers.refresh()
         const radar = outcome.state?.radar || {}
         const kilo = outcome.state?.kilo || {}
+        const catalog = outcome.state?.officialCatalog || {}
+        const routeSync = outcome.installedRoutes || {}
         return toolResult(
-          `已刷新：OpenRouter 免费模型 ${radar.freeCount || 0} 个（新上架 ${(radar.newIds || []).length} 个）` +
-            `${radar.error ? `，雷达错误：${radar.error}` : ''}；Kilo 匿名免费 ${ (kilo.items || []).length } 个（免注册免 Key）；订阅源 ${(outcome.state?.sources || []).filter(item => item.tier === 'feed').length} 条。`,
+          `已刷新：官方源清单 ${catalog.version || '内置版'}${catalog.error ? `（拉取失败：${catalog.error}）` : ''}；` +
+            `OpenRouter 免费模型 ${radar.freeCount || 0} 个（新上架 ${(radar.newIds || []).length} 个）` +
+            `${radar.error ? `，雷达错误：${radar.error}` : ''}；Kilo 匿名免费 ${ (kilo.items || []).length } 个（免注册免 Key）；` +
+            `订阅源 ${(outcome.state?.sources || []).filter(item => item.tier === 'feed').length} 条；已装路由同步 ${routeSync.updated || 0} 个，移除失效模型 ${routeSync.removedModels || 0} 个。`,
         )
       }
       throw new Error(`unknown action: ${action}`)
@@ -2040,8 +2419,8 @@ export function apply(ctx, config = {}) {
     await settings.mutate(descriptor.ns, [{ op: 'set', path: ['providers', KILO_ROUTE], value }], descriptor.revision)
     state.kiloProxy = { ...(state.kiloProxy || {}), port: runtime.proxyPort, random: true, healError: null, at: new Date().toISOString() }
     saveState(state)
-    // The machine room moved: re-pull the free list so the panel and the route agree.
-    await refreshKilo(state, false).catch(() => {})
+    // The route now points at the current port. Do not pull upstream lists here:
+    // model-pool refreshes are explicit user actions only.
     return true
   }
 
@@ -2130,7 +2509,7 @@ export function apply(ctx, config = {}) {
     },
     testRelay: body => detectRelay(ctx, body, state),
     refresh: async () => {
-      const outcome = await refreshAll(state, true)
+      const outcome = await refreshAll(ctx, state, true, config)
       return { ok: true, ...outcome, state: snapshot(ctx, state) }
     },
     kiloModels: async body => {
@@ -2375,19 +2754,11 @@ export function apply(ctx, config = {}) {
     const disposeTool = registerTool(ctx, state, handlers)
     // Machine room first, pools second: wait for the proxy to bind (and record the
     // port this device got) before pulling any model list.
-    const radarTimer = setTimeout(() => {
-      Promise.resolve(proxyReady)
-        .then(port => {
-          console.log(`[${NAME}] local machine room ready on 127.0.0.1:${port || '?'}`)
-          return Promise.allSettled([refreshRadar(state), refreshKilo(state, false), refreshPollinations(state, false), refreshLlm7(state, false)])
-        })
-        .then(() => saveState(state))
-        .catch(() => {})
-    }, 4000)
-    radarTimer.unref?.()
+    // Everything remote is pull-on-demand: startup only binds the local proxy and
+    // reads cached state. The user must press Refresh eggs to hit upstream APIs.
+    proxyReady.then(port => console.log(`[${NAME}] local machine room ready on 127.0.0.1:${port || '?'}`)).catch(() => {})
     return () => {
       scheduler = null
-      clearTimeout(radarTimer)
       proxyReady.then(() => runtime.proxyServer?.close()).catch(() => {})
       disposeRoute()
       stopScheduler.dispose()
@@ -2397,4 +2768,18 @@ export function apply(ctx, config = {}) {
 }
 
 /** Exposed for the offline test harness only; not a supported API. */
-export const internals = { refreshRadar, refreshKilo, radarFromKilo, describeNetworkError, verifyManifest, compareVersions }
+export const internals = {
+  refreshRadar,
+  refreshKilo,
+  radarFromKilo,
+  describeNetworkError,
+  verifyManifest,
+  compareVersions,
+  verifyOfficialCatalog,
+  catalogPayload,
+  catalogFields,
+  refreshOfficialCatalog,
+  sanitiseSource,
+  syncInstalledSources,
+  officialCatalogUrls,
+}
