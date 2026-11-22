@@ -11,7 +11,7 @@ const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
 // Keep in sync with package.json; the update check falls back to this when the
 // loader gives us an entry URL that does not sit next to package.json.
-const PLUGIN_VERSION = '1.5.5'
+const PLUGIN_VERSION = '1.5.6'
 
 /**
  * Release signing key (Ed25519, public half). The private half lives outside the
@@ -396,6 +396,7 @@ function sanitiseFeedSource(raw) {
 /* ------------------------------------------------ official source catalogue */
 
 const CATALOG_SCHEMA = 1
+const OFFICIAL_CATALOG_TTL = 3 * 24 * 60 * 60 * 1000
 
 /** Canonical source fields covered by the official-catalogue signature. */
 function catalogSourcePayload(raw) {
@@ -471,61 +472,106 @@ function verifyOfficialCatalog(doc) {
   return catalogFields(doc)
 }
 
-async function refreshOfficialCatalog(state, config, fetchText = getText) {
+async function refreshOfficialCatalog(state, config, fetchText = getText, options = {}) {
   const channel = updateChannel(config, state)
-  const urls = officialCatalogUrls(channel).map(withCacheBust)
-  const reasons = []
-  let chosen = null
-  // Priority order matters: the release asset is freshest, then git/raw mirrors.
-  // Each request is cache-busted because this only runs on an explicit refresh.
-  for (const url of urls) {
-    try {
-      const text = await fetchText(url, 10000)
-      let doc = null
-      try {
-        doc = JSON.parse(text)
-      } catch {
-        throw new Error('官方源清单不是合法 JSON')
-      }
-      chosen = { url, fields: verifyOfficialCatalog(doc) }
-      break
-    } catch (error) {
-      reasons.push(String(error?.message || error || '未知错误'))
+  const cachedSources = Array.isArray(state.officialCatalog?.sources) ? state.officialCatalog.sources : []
+  const cachedAt = state.officialCatalog?.at ? Date.parse(state.officialCatalog.at) : 0
+  const now = Date.now()
+  const age = cachedAt ? now - cachedAt : -1
+  if (!options.force && !state.officialCatalog?.error && cachedSources.length && age >= 0 && age < OFFICIAL_CATALOG_TTL) {
+    state.officialCatalog.nextCheckAt = new Date(cachedAt + OFFICIAL_CATALOG_TTL).toISOString()
+    return {
+      ok: true,
+      cached: true,
+      skipped: true,
+      version: state.officialCatalog.version || null,
+      updatedAt: state.officialCatalog.updatedAt || null,
+      count: cachedSources.length,
+      newCount: 0,
+      source: state.officialCatalog.source || null,
+      lane: state.officialCatalog.lane || null,
+      label: state.officialCatalog.label || null,
+      nextCheckAt: new Date(cachedAt + OFFICIAL_CATALOG_TTL).toISOString(),
     }
   }
-  if (!chosen) {
+
+  const rows = officialCatalogSources(channel).map(source => ({
+    ...source,
+    target: withCacheBust(source.url),
+  }))
+  // Race direct GitHub and mirror lanes. A VPN usually lets the direct lane win;
+  // without VPN, jsDelivr/ghproxy can win. All payloads are signature-checked.
+  const tasks = rows.map(async source => {
+    const text = await fetchText(source.target, 12000)
+    let doc = null
+    try {
+      doc = JSON.parse(text)
+    } catch {
+      throw new Error('官方源清单不是合法 JSON')
+    }
+    return { ...source, fields: verifyOfficialCatalog(doc) }
+  })
+  let settled = await settleWithin(tasks, 3500)
+  let valid = settled
+    .filter(item => item && item.status === 'fulfilled')
+    .map(item => item.value)
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.fields.updatedAt) || 0
+      const rightTime = Date.parse(right.fields.updatedAt) || 0
+      if (leftTime !== rightTime) return rightTime - leftTime
+      return String(right.fields.version).localeCompare(String(left.fields.version))
+    })
+  if (!valid.length) {
+    settled = await Promise.allSettled(tasks)
+    valid = settled.filter(item => item.status === 'fulfilled').map(item => item.value)
+  }
+  if (!valid.length) {
+    const reasons = settled
+      .filter(item => item.status === 'rejected')
+      .map(item => String(item.reason?.message || item.reason || '未知错误'))
     const message = reasons.find(item => /签名|JSON|版本|缺少/.test(item)) || reasons[0] || '没有可用的官方源清单'
     state.officialCatalog = {
       ...(state.officialCatalog || {}),
       error: message,
       lastAttemptAt: new Date().toISOString(),
     }
-    return { ok: false, error: message, fromCache: Boolean(state.officialCatalog?.sources?.length) }
+    return { ok: false, error: message, fromCache: Boolean(cachedSources.length) }
   }
-  const { url, fields } = chosen
+
+  const chosen = valid[0]
+  const fields = chosen.fields
   const seen = new Set(
     state.officialSeenIds?.length ? state.officialSeenIds : sourcePool(state).map(source => source.id),
   )
   const newIds = fields.sources.map(source => source.id).filter(id => !seen.has(id))
+  const fetchedAt = new Date().toISOString()
   state.officialCatalog = {
-    at: new Date().toISOString(),
+    at: fetchedAt,
     version: fields.version,
     updatedAt: fields.updatedAt,
     sources: fields.sources,
     accessLabels: fields.accessLabels,
-    source: url.split('?')[0],
+    source: chosen.url,
+    lane: chosen.lane,
+    label: chosen.label,
     error: null,
-    lastAttemptAt: new Date().toISOString(),
+    lastAttemptAt: fetchedAt,
+    nextCheckAt: new Date(Date.parse(fetchedAt) + OFFICIAL_CATALOG_TTL).toISOString(),
   }
   state.officialNewIds = newIds
   state.officialSeenIds = [...new Set([...seen, ...fields.sources.map(source => source.id)])]
   return {
     ok: true,
+    cached: false,
+    skipped: false,
     version: fields.version,
     updatedAt: fields.updatedAt,
     count: fields.sources.length,
     newCount: newIds.length,
     source: state.officialCatalog.source,
+    lane: chosen.lane,
+    label: chosen.label,
+    nextCheckAt: state.officialCatalog.nextCheckAt,
     fromCache: false,
   }
 }
@@ -572,11 +618,11 @@ async function refreshFeeds(state) {
   return results
 }
 
-async function refreshAll(ctx, state, force = true, config = {}) {
+async function refreshAll(ctx, state, force = true, config = {}, options = {}) {
   const [radar, feeds, officialCatalog] = await Promise.all([
     refreshRadar(state),
     refreshFeeds(state),
-    refreshOfficialCatalog(state, config).catch(error => ({
+    refreshOfficialCatalog(state, config, getText, { force: options.forceCatalog === true }).catch(error => ({
       ok: false,
       error: error?.message || String(error),
     })),
@@ -1879,6 +1925,10 @@ function snapshot(ctx, state) {
       version: state.officialCatalog?.version || null,
       updatedAt: state.officialCatalog?.updatedAt || null,
       source: state.officialCatalog?.source || null,
+      lane: state.officialCatalog?.lane || null,
+      label: state.officialCatalog?.label || null,
+      nextCheckAt: state.officialCatalog?.nextCheckAt || null,
+      ttlDays: 3,
       error: state.officialCatalog?.error || null,
       count: officialSources(state).length,
       cached: Boolean(state.officialCatalog?.sources?.length),
@@ -1943,31 +1993,86 @@ function updateChannel(config, state) {
   return { ...UPDATE_DEFAULT, ...(state.update || {}), ...(config?.update || {}) }
 }
 
-function updateUrls(channel) {
+function sourceLane(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === 'github.com' || host === 'raw.githubusercontent.com' ? 'direct' : 'mirror'
+  } catch {
+    return 'mirror'
+  }
+}
+
+function updateSources(channel) {
   const base = `${channel.owner}/${channel.repo}`
-  // Release asset first, then the raw endpoints; jsDelivr caches per file for hours,
-  // so it is the last resort instead of a primary mirror.
-  return [
-    `https://github.com/${base}/releases/latest/download/update.json`,
-    `https://raw.githubusercontent.com/${base}/${channel.branch}/update.json`,
-    `https://github.com/${base}/raw/${channel.branch}/update.json`,
-    `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/update.json`,
+  const raw = `https://raw.githubusercontent.com/${base}/${channel.branch}/update.json`
+  const rows = [
+    { url: `https://github.com/${base}/releases/latest/download/update.json`, label: 'GitHub Release', lane: 'direct' },
+    { url: raw, label: 'GitHub raw', lane: 'direct' },
+    { url: `https://github.com/${base}/raw/${channel.branch}/update.json`, label: 'GitHub raw', lane: 'direct' },
+    { url: `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/update.json`, label: 'jsDelivr', lane: 'mirror' },
+    { url: `https://fastly.jsdelivr.net/gh/${base}@${channel.branch}/update.json`, label: 'jsDelivr Fastly', lane: 'mirror' },
+    { url: `https://ghproxy.net/${raw}`, label: 'ghproxy', lane: 'mirror' },
+    { url: `https://ghfast.top/${raw}`, label: 'ghfast', lane: 'mirror' },
   ]
+  return rows
+}
+
+function updateUrls(channel) {
+  return updateSources(channel).map(source => source.url)
+}
+
+function officialCatalogSources(channel) {
+  const base = `${channel.owner}/${channel.repo}`
+  const raw = `https://raw.githubusercontent.com/${base}/${channel.branch}/catalog.json`
+  const rows = [
+    { url: `https://github.com/${base}/releases/latest/download/catalog.json`, label: 'GitHub Release', lane: 'direct' },
+    { url: raw, label: 'GitHub raw', lane: 'direct' },
+    { url: `https://github.com/${base}/raw/${channel.branch}/catalog.json`, label: 'GitHub raw', lane: 'direct' },
+    { url: `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/catalog.json`, label: 'jsDelivr', lane: 'mirror' },
+    { url: `https://fastly.jsdelivr.net/gh/${base}@${channel.branch}/catalog.json`, label: 'jsDelivr Fastly', lane: 'mirror' },
+    { url: `https://ghproxy.net/${raw}`, label: 'ghproxy', lane: 'mirror' },
+    { url: `https://ghfast.top/${raw}`, label: 'ghfast', lane: 'mirror' },
+  ]
+  return rows
 }
 
 function officialCatalogUrls(channel) {
-  const base = `${channel.owner}/${channel.repo}`
-  // The signed JSON is its own proof, so mirrors only affect availability, not trust.
-  return [
-    `https://github.com/${base}/releases/latest/download/catalog.json`,
-    `https://raw.githubusercontent.com/${base}/${channel.branch}/catalog.json`,
-    `https://github.com/${base}/raw/${channel.branch}/catalog.json`,
-    `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/catalog.json`,
-  ]
+  return officialCatalogSources(channel).map(source => source.url)
 }
 
 function withCacheBust(url) {
   return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`
+}
+
+/** Prefer whichever lanes answer quickly; wait for the slow ones only if none did. */
+function settleWithin(tasks, waitMs) {
+  return new Promise(resolve => {
+    let remaining = tasks.length
+    const settled = new Array(tasks.length)
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      resolve(settled.slice())
+    }
+    const timer = setTimeout(finish, waitMs)
+    timer.unref?.()
+    tasks.forEach((task, index) => {
+      Promise.resolve(task).then(
+        value => {
+          settled[index] = { status: 'fulfilled', value }
+          remaining -= 1
+          if (remaining === 0) finish()
+        },
+        reason => {
+          settled[index] = { status: 'rejected', reason }
+          remaining -= 1
+          if (remaining === 0) finish()
+        },
+      )
+    })
+  })
 }
 
 function localVersion() {
@@ -2094,54 +2199,83 @@ function describeDownloadError(error, timeoutMs) {
   return describeNetworkError(error, timeoutMs)
 }
 
-async function checkUpdate(state, config) {
+async function checkUpdate(state, config, fetchText = getText) {
   const channel = updateChannel(config, state)
   const current = localVersion()
-  const attempts = []
-  for (const url of updateUrls(channel)) {
-    for (let round = 0; round < 2; round += 1) {
-      const target = round === 0 ? url : withCacheBust(url)
-      const sigUrl = round === 0 ? `${url}.sig` : withCacheBust(`${url}.sig`)
+  const sources = updateSources(channel)
+  // Direct GitHub and domestic mirrors race together. The signed manifest makes
+  // any lane safe; the freshest valid manifest wins even if an older mirror replies first.
+  const tasks = sources.map(async source => {
+    const target = withCacheBust(source.url)
+    const text = await fetchText(target, 12000)
+    let doc = null
+    try {
+      doc = JSON.parse(text)
+    } catch {
+      doc = null
+    }
+    if (!doc) throw new Error('更新清单不是合法 JSON')
+    let fields = verifyEmbeddedManifest(doc)
+    const embedded = Boolean(fields)
+    if (!fields) {
+      let sigText = ''
       try {
-        const text = await getText(target, 15000)
-        let doc = null
-        try {
-          doc = JSON.parse(text)
-        } catch {
-          doc = null
-        }
-        if (!doc) throw new Error('更新清单不是合法 JSON')
-        let fields = verifyEmbeddedManifest(doc)
-        const embedded = Boolean(fields)
-        if (!fields) {
-          let sigText = ''
-          try {
-            sigText = await getText(sigUrl, 15000)
-          } catch (error) {
-            throw new Error(`更新清单缺少签名（update.json.sig 不可用：${String(error?.message || error)}）`)
-          }
-          fields = verifyDetachedManifest(text, sigText)
-        }
-        return {
-          ok: true,
-          current,
-          latest: fields.version,
-          newer: compareVersions(fields.version, current) > 0,
-          tarball: fields.tarball,
-          tarballMirrors: fields.tarballMirrors,
-          sha256: fields.sha256,
-          notes: fields.notes,
-          source: url,
-          channel,
-          signed: true,
-          embedded,
-          cacheBusted: round > 0,
-        }
+        sigText = await fetchText(withCacheBust(`${source.url}.sig`), 12000)
       } catch (error) {
-        attempts.push({ url, cacheBusted: round > 0, error: describeUpdateError(error, 15000) })
+        throw new Error(`更新清单缺少签名（update.json.sig 不可用：${String(error?.message || error)}）`)
       }
+      fields = verifyDetachedManifest(text, sigText)
+    }
+    return { ...source, fields, embedded }
+  })
+  let settled = await settleWithin(tasks, 3500)
+  let valid = settled
+    .filter(item => item && item.status === 'fulfilled')
+    .map(item => item.value)
+    .sort((left, right) => {
+      const versionDiff = compareVersions(right.fields.version, left.fields.version)
+      if (versionDiff) return versionDiff
+      return left.lane === right.lane ? 0 : left.lane === 'direct' ? -1 : 1
+    })
+  if (!valid.length) {
+    settled = await Promise.allSettled(tasks)
+    valid = settled.filter(item => item.status === 'fulfilled').map(item => item.value)
+  }
+  if (valid.length) {
+    const chosen = valid[0]
+    const fields = chosen.fields
+    return {
+      ok: true,
+      current,
+      latest: fields.version,
+      newer: compareVersions(fields.version, current) > 0,
+      tarball: fields.tarball,
+      tarballMirrors: fields.tarballMirrors,
+      sha256: fields.sha256,
+      notes: fields.notes,
+      source: chosen.url,
+      channel,
+      signed: true,
+      embedded: chosen.embedded,
+      lane: chosen.lane,
+      label: chosen.label,
+      cacheBusted: true,
+      checkedMirrors: sources.length,
     }
   }
+  const attempts = settled
+    .map((item, index) =>
+      item.status === 'rejected'
+        ? {
+            url: sources[index]?.url || '',
+            label: sources[index]?.label || '',
+            lane: sources[index]?.lane || 'mirror',
+            cacheBusted: true,
+            error: describeUpdateError(item.reason, 12000),
+          }
+        : null,
+    )
+    .filter(Boolean)
   const signaturesSeen = attempts.some(item => item.error.includes('签名'))
   return {
     ok: false,
@@ -2155,13 +2289,13 @@ async function checkUpdate(state, config) {
   }
 }
 
-async function downloadUpdate(url, sha256, version) {
+async function fetchUpdateBuffer(url, sha256, timeoutMs = 30000) {
   if (!/^https?:\/\//i.test(url)) throw new Error('更新包地址无效')
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 120000)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(url, {
-      headers: { 'user-agent': UA, accept: 'application/octet-stream' },
+      headers: { 'user-agent': UA, accept: 'application/octet-stream', 'cache-control': 'no-cache' },
       signal: controller.signal,
       redirect: 'follow',
     })
@@ -2172,16 +2306,50 @@ async function downloadUpdate(url, sha256, version) {
       const actual = crypto.createHash('sha256').update(buffer).digest('hex')
       if (actual.toLowerCase() !== sha256.toLowerCase()) throw new Error('sha256 校验失败，已中止安装')
     }
-    // Keep the tarball: the profile dependency records this path, so a temp
-    // directory would leave it dangling after the OS cleans up.
-    const dir = path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), NAME, 'packages')
-    fs.mkdirSync(dir, { recursive: true })
-    const label = String(version || Date.now()).replace(/[^0-9A-Za-z._-]/g, '_')
-    const file = path.join(dir, `cyber-egg-${label}.tgz`)
-    fs.writeFileSync(file, buffer)
-    return { file, bytes: buffer.length, sha256: sha256 || crypto.createHash('sha256').update(buffer).digest('hex') }
+    return buffer
   } finally {
     clearTimeout(timer)
+  }
+}
+
+function saveUpdateBuffer(buffer, sha256, version) {
+  // Keep the tarball: the profile dependency records this path, so a temp
+  // directory would leave it dangling after the OS cleans up.
+  const dir = path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), NAME, 'packages')
+  fs.mkdirSync(dir, { recursive: true })
+  const label = String(version || Date.now()).replace(/[^0-9A-Za-z._-]/g, '_')
+  const file = path.join(dir, `cyber-egg-${label}.tgz`)
+  fs.writeFileSync(file, buffer)
+  return { file, bytes: buffer.length, sha256: sha256 || crypto.createHash('sha256').update(buffer).digest('hex') }
+}
+
+async function downloadUpdate(url, sha256, version) {
+  return saveUpdateBuffer(await fetchUpdateBuffer(url, sha256, 120000), sha256, version)
+}
+
+async function downloadUpdateFromSources(sources, sha256, version) {
+  if (!sources.length) throw new Error('update.json 没有给出 tarball 地址')
+  // Race every tarball lane; sha256 gates the winner, so a poisoned proxy cannot
+  // install anything and a slow direct GitHub path cannot block a working mirror.
+  const runners = sources.map(async source => ({
+    source,
+    buffer: await fetchUpdateBuffer(source.url, sha256, 30000),
+  }))
+  let winner = null
+  try {
+    winner = await Promise.any(runners)
+  } catch (error) {
+    const failures = (error?.errors || []).map((item, index) => {
+      const source = sources[index] || {}
+      return `${source.url || '?'}: ${describeDownloadError(item, 30000)}`
+    })
+    throw new Error(`下载失败（已试 ${sources.length} 个地址）：${failures.join('；')}`)
+  }
+  return {
+    ...saveUpdateBuffer(winner.buffer, sha256, version),
+    source: winner.source.url,
+    lane: winner.source.lane,
+    label: winner.source.label,
   }
 }
 
@@ -2213,18 +2381,14 @@ async function installUpdate(ctx, state, body, config) {
     latest = checked.latest
   }
   if (!url && !mirrors.length) throw new Error('update.json 没有给出 tarball 地址')
-  const candidates = [url, ...mirrors].filter(Boolean)
-  const failures = []
-  let downloaded = null
-  for (const candidate of candidates) {
-    try {
-      downloaded = await downloadUpdate(candidate, sha256, latest)
-      break
-    } catch (error) {
-      failures.push(`${candidate}: ${describeDownloadError(error, 120000)}`)
-    }
-  }
-  if (!downloaded) throw new Error(`下载失败（已试 ${candidates.length} 个地址）：${failures.join('；')}`)
+  const candidates = [url, ...mirrors]
+    .filter(Boolean)
+    .map(candidate => ({
+      url: candidate,
+      lane: sourceLane(candidate),
+      label: sourceLane(candidate) === 'direct' ? 'GitHub direct' : 'mirror',
+    }))
+  const downloaded = await downloadUpdateFromSources(candidates, sha256, latest)
   let result = null
   try {
     result = await manager.installBundle(downloaded.file, { enabled: true })
@@ -2357,9 +2521,12 @@ function registerTool(ctx, state, handlers) {
         const radar = outcome.state?.radar || {}
         const kilo = outcome.state?.kilo || {}
         const catalog = outcome.state?.officialCatalog || {}
+        const catalogResult = outcome.officialCatalog || {}
         const routeSync = outcome.installedRoutes || {}
+        const catalogLane = catalog.lane === 'direct' ? 'GitHub 直连' : catalog.lane === 'mirror' ? '国内镜像' : ''
+        const catalogState = catalogResult.skipped ? '，3 天内复用缓存' : catalogLane ? `，${catalogLane}` : ''
         return toolResult(
-          `已刷新：官方源清单 ${catalog.version || '内置版'}${catalog.error ? `（拉取失败：${catalog.error}）` : ''}；` +
+          `已刷新：官方源清单 ${catalog.version || '内置版'}${catalogState}${catalog.error ? `（拉取失败：${catalog.error}）` : ''}；` +
             `OpenRouter 免费模型 ${radar.freeCount || 0} 个（新上架 ${(radar.newIds || []).length} 个）` +
             `${radar.error ? `，雷达错误：${radar.error}` : ''}；Kilo 匿名免费 ${ (kilo.items || []).length } 个（免注册免 Key）；` +
             `订阅源 ${(outcome.state?.sources || []).filter(item => item.tier === 'feed').length} 条；已装路由同步 ${routeSync.updated || 0} 个，移除失效模型 ${routeSync.removedModels || 0} 个。`,
@@ -2508,8 +2675,8 @@ export function apply(ctx, config = {}) {
       return { ok: true }
     },
     testRelay: body => detectRelay(ctx, body, state),
-    refresh: async () => {
-      const outcome = await refreshAll(ctx, state, true, config)
+    refresh: async body => {
+      const outcome = await refreshAll(ctx, state, true, config, { forceCatalog: body?.forceCatalog === true })
       return { ok: true, ...outcome, state: snapshot(ctx, state) }
     },
     kiloModels: async body => {
@@ -2782,4 +2949,11 @@ export const internals = {
   sanitiseSource,
   syncInstalledSources,
   officialCatalogUrls,
+  officialCatalogSources,
+  updateUrls,
+  updateSources,
+  sourceLane,
+  downloadUpdateFromSources,
+  checkUpdate,
+  OFFICIAL_CATALOG_TTL,
 }
