@@ -73,9 +73,13 @@ window.__ModuleLoader__.load({
         'radar.hint': '国内网络通常无法直连 OpenRouter；可挂代理后点「刷新鸡蛋」重试，或直接用「匿名免费」页里的 Kilo 免费池。',
         'radarUpdated': '已更新：当前 {n} 个免费模型',
         'refreshRoutes': '已同步 {a} 个已装来源，移除 {b} 个失效模型',
-        'catalog.label': '官方源清单 {version} · 更新于 {time}',
+        'catalog.label': '官方源清单 {version} · {lane} · 更新于 {time}',
         'catalog.bundled': '官方源清单为内置版，点「刷新鸡蛋」拉取最新清单与文案',
         'catalog.failed': '官方源清单拉取失败（{msg}），继续使用缓存',
+        'catalog.lane.direct': 'GitHub 直连',
+        'catalog.lane.mirror': '国内镜像',
+        'catalog.cache': '每 3 天检查一次，本次复用本地缓存；下次检查 {time}',
+        'catalog.fresh': '每 3 天检查一次；下次检查 {time}',
         'refreshEggs': '刷新鸡蛋',
         'refreshing': '刷新中…',
         'showAll': '展开全部 {n} 个',
@@ -252,9 +256,13 @@ window.__ModuleLoader__.load({
           'OpenRouter is usually unreachable from mainland networks. Use a proxy and press Refresh eggs, or use the Kilo pool on the No-key tab.',
         'radarUpdated': 'Updated: {n} free models right now',
         'refreshRoutes': 'Synced {a} installed sources, removed {b} stale models',
-        'catalog.label': 'Official catalogue {version} · updated {time}',
+        'catalog.label': 'Official catalogue {version} · {lane} · updated {time}',
         'catalog.bundled': 'Using the bundled official catalogue. Press Refresh eggs to fetch the latest copy and descriptions.',
         'catalog.failed': 'Official catalogue fetch failed ({msg}); using the cached copy',
+        'catalog.lane.direct': 'GitHub direct',
+        'catalog.lane.mirror': 'Mirror',
+        'catalog.cache': 'Checked every 3 days; using cache this time. Next check {time}',
+        'catalog.fresh': 'Checked every 3 days; next check {time}',
         'refreshEggs': 'Refresh eggs',
         'refreshing': 'Refreshing…',
         'showAll': 'Show all {n}',
@@ -1171,6 +1179,8 @@ window.__ModuleLoader__.load({
 
       const catalogInfo = officialCatalog || {}
       const catalogChecked = catalogInfo.updatedAt ? new Date(catalogInfo.updatedAt).toLocaleString() : '—'
+      const catalogLane = catalogInfo.lane ? t(`catalog.lane.${catalogInfo.lane}`) : '—'
+      const catalogNext = catalogInfo.nextCheckAt ? new Date(catalogInfo.nextCheckAt).toLocaleString() : '—'
       const groups = [
         { id: 'hot', title: t('group.hot'), mark: '🔥', items: sources.filter(source => source.tier === 'hot') },
         { id: 'pick', title: t('group.pick'), mark: t('group.pickMark'), items: sources.filter(source => source.tier === 'pick') },
@@ -1194,9 +1204,12 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'ce-hint' },
             catalogInfo.cached
-              ? t('catalog.label', { version: catalogInfo.version || '—', time: catalogChecked })
+              ? t('catalog.label', { version: catalogInfo.version || '—', lane: catalogLane, time: catalogChecked })
               : t('catalog.bundled'),
           ),
+          catalogInfo.cached
+            ? h('div', { className: 'ce-hint', style: { marginTop: 4 } }, t('catalog.fresh', { time: catalogNext }))
+            : null,
           catalogInfo.error
             ? h('div', { className: 'ce-error', role: 'alert', style: { marginTop: 6 } }, t('catalog.failed', { msg: catalogInfo.error }))
             : null,
@@ -1755,8 +1768,12 @@ window.__ModuleLoader__.load({
             setUpdateInfo(result)
             if (manual) {
               if (!result.ok) toast(result.signedRequired ? t('update.badSignature') : `${t('update.failed')}：${result.error || ''}`, 'bad')
-              else if (result.newer) toast(t('update.available', { v: result.latest }), 'ok')
-              else toast(t('update.latest', { v: result.current || result.latest }), 'ok')
+              else {
+                const lane = result.lane ? t(`catalog.lane.${result.lane}`) : ''
+                const suffix = lane ? ` · ${lane}` : ''
+                if (result.newer) toast(t('update.available', { v: result.latest }) + suffix, 'ok')
+                else toast(t('update.latest', { v: result.current || result.latest }) + suffix, 'ok')
+              }
             }
           } catch (caught) {
             if (manual) toast(`${t('update.failed')}：${String(caught?.message || t('unknownError'))}`, 'bad')
