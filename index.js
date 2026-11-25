@@ -11,7 +11,7 @@ const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
 // Keep in sync with package.json; the update check falls back to this when the
 // loader gives us an entry URL that does not sit next to package.json.
-const PLUGIN_VERSION = '1.5.6'
+const PLUGIN_VERSION = '1.5.7'
 
 /**
  * Release signing key (Ed25519, public half). The private half lives outside the
@@ -21,6 +21,15 @@ const PLUGIN_VERSION = '1.5.6'
  */
 const UPDATE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEANg2VG31PFiDspqYP4Jsv2tri0jZNtnUZluNf2LYKJ1o=
+-----END PUBLIC KEY-----`
+
+/**
+ * Dedicated catalogue-signing key. The matching private key is only used by the
+ * GitHub Actions catalogue job (stored as CATALOG_SIGNING_KEY), never by release
+ * packaging. Compromise of this key cannot forge plugin update packages.
+ */
+const CATALOG_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAercySZd4bLMyrxbkKkrrWw5HMu0joGTURw/AsSNbTgc=
 -----END PUBLIC KEY-----`
 
 export const inject = ['webServer']
@@ -361,6 +370,19 @@ function fieldUrl(value, limit = 300) {
   }
 }
 
+const PROBE_STATUSES = new Set(['ok', 'auth-required', 'http-error', 'unreachable', 'invalid'])
+
+function normaliseProbe(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    checkedAt: fieldText(raw.checkedAt, 40),
+    status: PROBE_STATUSES.has(raw.status) ? raw.status : 'invalid',
+    httpStatus: Number(raw.httpStatus) || 0,
+    modelCount: Number(raw.modelCount) || 0,
+    freeModelCount: Number(raw.freeModelCount) || 0,
+  }
+}
+
 function sanitiseSource(raw, { official = false } = {}) {
   if (!raw || typeof raw !== 'object') return null
   const id = fieldText(raw.id, 80)
@@ -386,6 +408,7 @@ function sanitiseSource(raw, { official = false } = {}) {
     api: SOURCE_APIS.has(raw.api) ? raw.api : 'openai-completions',
     baseURL,
     keyHint: fieldText(raw.keyHint, 60),
+    probe: normaliseProbe(raw.probe),
   }
 }
 
@@ -417,6 +440,15 @@ function catalogSourcePayload(raw) {
     api: fieldText(raw?.api, 60),
     baseURL: fieldText(raw?.baseURL, 300),
     keyHint: fieldText(raw?.keyHint, 60),
+    probe: raw?.probe
+      ? {
+          checkedAt: fieldText(raw.probe.checkedAt, 40),
+          status: fieldText(raw.probe.status, 20),
+          httpStatus: Number(raw.probe.httpStatus) || 0,
+          modelCount: Number(raw.probe.modelCount) || 0,
+          freeModelCount: Number(raw.probe.freeModelCount) || 0,
+        }
+      : null,
   }
 }
 
@@ -427,7 +459,27 @@ function catalogPayload(doc) {
       schema: Number(doc?.schema || CATALOG_SCHEMA),
       version: String(doc?.version || ''),
       updatedAt: String(doc?.updatedAt || ''),
+      autoCheckAt: String(doc?.autoCheckAt || ''),
       sources: (Array.isArray(doc?.sources) ? doc.sources : []).map(catalogSourcePayload),
+      accessLabels: Object.keys(labels)
+        .sort()
+        .map(key => [String(key), String(labels[key] ?? '')]),
+    }),
+    'utf8',
+  )
+}
+
+function legacyCatalogPayload(doc) {
+  const labels = doc?.accessLabels && typeof doc.accessLabels === 'object' ? doc.accessLabels : {}
+  return Buffer.from(
+    JSON.stringify({
+      schema: Number(doc?.schema || CATALOG_SCHEMA),
+      version: String(doc?.version || ''),
+      updatedAt: String(doc?.updatedAt || ''),
+      sources: (Array.isArray(doc?.sources) ? doc.sources : []).map(source => {
+        const { probe, ...legacy } = catalogSourcePayload(source)
+        return legacy
+      }),
       accessLabels: Object.keys(labels)
         .sort()
         .map(key => [String(key), String(labels[key] ?? '')]),
@@ -440,6 +492,7 @@ function catalogFields(doc) {
   if (Number(doc?.schema || CATALOG_SCHEMA) !== CATALOG_SCHEMA) throw new Error('官方源清单版本不受支持')
   const version = String(doc?.version || '').trim()
   const updatedAt = String(doc?.updatedAt || '').trim()
+  const autoCheckAt = String(doc?.autoCheckAt || '').trim()
   if (!version) throw new Error('官方源清单缺少 version')
   if (!updatedAt) throw new Error('官方源清单缺少 updatedAt')
   const rows = Array.isArray(doc?.sources) ? doc.sources.slice(0, 200) : []
@@ -451,20 +504,32 @@ function catalogFields(doc) {
       accessLabels[String(key).slice(0, 40)] = String(value ?? '').slice(0, 80)
     }
   }
-  return { version, updatedAt, sources, accessLabels }
+  return { version, updatedAt, autoCheckAt, sources, accessLabels }
 }
 
 function verifyOfficialCatalog(doc) {
-  const signature = String(doc?.signature || '').trim()
-  if (!signature) throw new Error('官方源清单缺少签名')
+  const current = String(doc?.catalogSignature || '').trim()
+  const legacy = String(doc?.signature || '').trim()
+  if (!current && !legacy) throw new Error('官方源清单缺少签名')
   let verified = false
   try {
-    verified = crypto.verify(
-      null,
-      catalogPayload(doc),
-      crypto.createPublicKey(UPDATE_PUBLIC_KEY),
-      Buffer.from(signature, 'base64'),
-    )
+    if (current) {
+      verified = crypto.verify(
+        null,
+        catalogPayload(doc),
+        crypto.createPublicKey(CATALOG_PUBLIC_KEY),
+        Buffer.from(current, 'base64'),
+      )
+    } else {
+      // Compatibility with catalogues signed by the release key before the
+      // dedicated catalogue key existed (1.5.5 and earlier).
+      verified = crypto.verify(
+        null,
+        legacyCatalogPayload(doc),
+        crypto.createPublicKey(UPDATE_PUBLIC_KEY),
+        Buffer.from(legacy, 'base64'),
+      )
+    }
   } catch (error) {
     throw new Error(`官方源清单签名校验失败：${error?.message || error}`)
   }
@@ -549,6 +614,7 @@ async function refreshOfficialCatalog(state, config, fetchText = getText, option
     at: fetchedAt,
     version: fields.version,
     updatedAt: fields.updatedAt,
+    autoCheckAt: fields.autoCheckAt || null,
     sources: fields.sources,
     accessLabels: fields.accessLabels,
     source: chosen.url,
@@ -566,6 +632,7 @@ async function refreshOfficialCatalog(state, config, fetchText = getText, option
     skipped: false,
     version: fields.version,
     updatedAt: fields.updatedAt,
+    autoCheckAt: fields.autoCheckAt || null,
     count: fields.sources.length,
     newCount: newIds.length,
     source: state.officialCatalog.source,
@@ -1924,6 +1991,7 @@ function snapshot(ctx, state) {
       at: state.officialCatalog?.at || null,
       version: state.officialCatalog?.version || null,
       updatedAt: state.officialCatalog?.updatedAt || null,
+      autoCheckAt: state.officialCatalog?.autoCheckAt || null,
       source: state.officialCatalog?.source || null,
       lane: state.officialCatalog?.lane || null,
       label: state.officialCatalog?.label || null,
@@ -2237,9 +2305,19 @@ async function checkUpdate(state, config, fetchText = getText) {
       if (versionDiff) return versionDiff
       return left.lane === right.lane ? 0 : left.lane === 'direct' ? -1 : 1
     })
-  if (!valid.length) {
+  // A fast mirror can still be serving the previous release. Only accept the
+  // quick batch if it already proves a newer version; otherwise wait for slower
+  // lanes so a stale jsDelivr copy cannot hide an update.
+  if (!valid.length || compareVersions(valid[0].fields.version, current) <= 0) {
     settled = await Promise.allSettled(tasks)
-    valid = settled.filter(item => item.status === 'fulfilled').map(item => item.value)
+    valid = settled
+      .filter(item => item.status === 'fulfilled')
+      .map(item => item.value)
+      .sort((left, right) => {
+        const versionDiff = compareVersions(right.fields.version, left.fields.version)
+        if (versionDiff) return versionDiff
+        return left.lane === right.lane ? 0 : left.lane === 'direct' ? -1 : 1
+      })
   }
   if (valid.length) {
     const chosen = valid[0]
@@ -2944,6 +3022,7 @@ export const internals = {
   compareVersions,
   verifyOfficialCatalog,
   catalogPayload,
+  legacyCatalogPayload,
   catalogFields,
   refreshOfficialCatalog,
   sanitiseSource,
