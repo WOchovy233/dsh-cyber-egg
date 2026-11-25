@@ -1,14 +1,14 @@
 {
-  "version": "1.5.6",
-  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.5.6/cyber-egg-1.5.6.tgz",
+  "version": "1.5.7",
+  "tarball": "https://github.com/WOchovy233/dsh-cyber-egg/releases/download/v1.5.7/cyber-egg-1.5.7.tgz",
   "tarballMirrors": [
-    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.5.6/cyber-egg-1.5.6.tgz",
-    "https://fastly.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.5.6/cyber-egg-1.5.6.tgz",
-    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.5.6/cyber-egg-1.5.6.tgz",
-    "https://ghproxy.net/https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.5.6/cyber-egg-1.5.6.tgz",
-    "https://ghfast.top/https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.5.6/cyber-egg-1.5.6.tgz"
+    "https://cdn.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.5.7/cyber-egg-1.5.7.tgz",
+    "https://fastly.jsdelivr.net/gh/WOchovy233/dsh-cyber-egg@v1.5.7/cyber-egg-1.5.7.tgz",
+    "https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.5.7/cyber-egg-1.5.7.tgz",
+    "https://ghproxy.net/https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.5.7/cyber-egg-1.5.7.tgz",
+    "https://ghfast.top/https://raw.githubusercontent.com/WOchovy233/dsh-cyber-egg/v1.5.7/cyber-egg-1.5.7.tgz"
   ],
-  "sha256": "F1C8EABC230DB2C2EFECD680BDD6A6D61C420DC63FE28FCCAE3581076CFBB6E4",
-  "notes": "1.5.6：优化无 VPN / 弱网环境下的刷新与更新。官方源清单改为仅在你点「刷新鸡蛋」时检查，成功缓存 3 天内复用，减少移动端请求和失败回退；拉取清单时并行竞速 GitHub 直连、jsDelivr、Fastly、ghproxy、ghfast 镜像，验签通过且更新时间最新者胜出，VPN 与否会自动走更快通道，面板会标明「GitHub 直连 / 国内镜像」。检查更新同样并行检索多镜像并选取最高的已签名版本；更新包下载也改为多通道竞速且以 sha256 为准。桌面端与安卓 DSH Go 共用同一安装包。",
-  "signature": "dAngij6eytbMNc/+d17DF/eEt9mot0zq4RWBKmx1Uu1o0pM4OGs0joUjiJ7YRsWXaKNzlOE5tA3pQF2y7yA3AQ=="
+  "sha256": "AE0A7BD533201EAA445AD86E610F7549348120CA5912F582950A7ED8E28916B2",
+  "notes": "1.5.7：官方源清单进入自动维护模式。新增独立的目录签名密钥，GitHub Actions 每天检查、实际最多每 3 天探测一次各来源的 /models 状态并更新 catalog.json，只有机器可验证的字段自动变化（可达性、HTTP 状态、模型数、免费模型数），人工文案不被覆盖；目录密钥只保存在 GitHub Actions Secret，不能用于伪造插件更新包。插件同时支持新的 catalogSignature 和旧的 release-key 签名，平滑迁移。面板显示自动探测状态；官方清单仍只在你点「刷新鸡蛋」时拉取，成功缓存 3 天。更新清单与 tgz 继续多镜像竞速，验签和 sha256 不变。桌面端与安卓 DSH Go 共用同一安装包。",
+  "signature": "24b+HPgm/FGJtDqDUfLToBjukmJIxvL0ixp1fU451EzFW1H6DgwWYVOXFdrtC0c70TgPB/yEo9Uc48DNlVdLDw=="
 }
