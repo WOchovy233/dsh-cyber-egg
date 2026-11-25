@@ -11,11 +11,11 @@ const NAME = 'cyber-egg'
 const API_PREFIX = '/cyber-egg/api'
 // Keep in sync with package.json; the update check falls back to this when the
 // loader gives us an entry URL that does not sit next to package.json.
-const PLUGIN_VERSION = '1.5.7'
+const PLUGIN_VERSION = '1.5.8'
 
 /**
- * Release signing key (Ed25519, public half). The private half lives outside the
- * repository at D:\python\鸡蛋私钥.pem and is only used by publish-github.ps1.
+ * Release signing key (Ed25519, public half). The private half stays outside the
+ * repository and is used only by the local release script.
  * Replacing this constant means replacing the trust root: ships a new key and every
  * installed copy must be updated manually once, so treat the private key as precious.
  */
@@ -576,19 +576,26 @@ async function refreshOfficialCatalog(state, config, fetchText = getText, option
     }
     return { ...source, fields: verifyOfficialCatalog(doc) }
   })
+  const rankCatalog = (left, right) => {
+    const leftTime = Date.parse(left.fields.updatedAt) || 0
+    const rightTime = Date.parse(right.fields.updatedAt) || 0
+    if (leftTime !== rightTime) return rightTime - leftTime
+    return String(right.fields.version).localeCompare(String(left.fields.version))
+  }
+  const cachedUpdatedAt = Date.parse(state.officialCatalog?.updatedAt) || 0
   let settled = await settleWithin(tasks, 3500)
   let valid = settled
     .filter(item => item && item.status === 'fulfilled')
     .map(item => item.value)
-    .sort((left, right) => {
-      const leftTime = Date.parse(left.fields.updatedAt) || 0
-      const rightTime = Date.parse(right.fields.updatedAt) || 0
-      if (leftTime !== rightTime) return rightTime - leftTime
-      return String(right.fields.version).localeCompare(String(left.fields.version))
-    })
-  if (!valid.length) {
+    .sort(rankCatalog)
+  // A fast mirror can serve an older catalog. Wait for slower lanes when the
+  // quick batch is not newer than the cached content.
+  if (!valid.length || (cachedUpdatedAt && (Date.parse(valid[0].fields.updatedAt) || 0) <= cachedUpdatedAt)) {
     settled = await Promise.allSettled(tasks)
-    valid = settled.filter(item => item.status === 'fulfilled').map(item => item.value)
+    valid = settled
+      .filter(item => item.status === 'fulfilled')
+      .map(item => item.value)
+      .sort(rankCatalog)
   }
   if (!valid.length) {
     const reasons = settled
@@ -2079,6 +2086,7 @@ function updateSources(channel) {
     { url: `https://github.com/${base}/raw/${channel.branch}/update.json`, label: 'GitHub raw', lane: 'direct' },
     { url: `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/update.json`, label: 'jsDelivr', lane: 'mirror' },
     { url: `https://fastly.jsdelivr.net/gh/${base}@${channel.branch}/update.json`, label: 'jsDelivr Fastly', lane: 'mirror' },
+    { url: `https://raw.githack.com/${base}/${channel.branch}/update.json`, label: 'githack', lane: 'mirror' },
     { url: `https://ghproxy.net/${raw}`, label: 'ghproxy', lane: 'mirror' },
     { url: `https://ghfast.top/${raw}`, label: 'ghfast', lane: 'mirror' },
   ]
@@ -2098,6 +2106,7 @@ function officialCatalogSources(channel) {
     { url: `https://github.com/${base}/raw/${channel.branch}/catalog.json`, label: 'GitHub raw', lane: 'direct' },
     { url: `https://cdn.jsdelivr.net/gh/${base}@${channel.branch}/catalog.json`, label: 'jsDelivr', lane: 'mirror' },
     { url: `https://fastly.jsdelivr.net/gh/${base}@${channel.branch}/catalog.json`, label: 'jsDelivr Fastly', lane: 'mirror' },
+    { url: `https://raw.githack.com/${base}/${channel.branch}/catalog.json`, label: 'githack', lane: 'mirror' },
     { url: `https://ghproxy.net/${raw}`, label: 'ghproxy', lane: 'mirror' },
     { url: `https://ghfast.top/${raw}`, label: 'ghfast', lane: 'mirror' },
   ]

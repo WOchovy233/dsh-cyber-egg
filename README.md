@@ -12,8 +12,8 @@ DeepSeek Harness 插件：每天捡免费 token，一键装进模型列表，中
 
 | 扫码直接下载最新包 | 扫码打开版本页 | 扫码打开仓库 |
 |:---:|:---:|:---:|
-| <img src="qr/download.png" width="180" alt="下载最新 cyber-egg-latest.tgz"> | <img src="qr/releases.png" width="180" alt="全部版本"> | <img src="qr/repo.png" width="180" alt="仓库主页"> |
-| `cyber-egg-latest.tgz` | 历史版本与更新说明 | 源码 |
+| <img src="qr/download.png" width="180" alt="下载最新 cyber-egg-latest.tgz"> | <img src="qr/releases.png" width="180" alt="最新版本"> | <img src="qr/repo.png" width="180" alt="仓库主页"> |
+| `cyber-egg-latest.tgz` | 最新版本与更新说明 | 源码 |
 
 **点一下就下载（这条链接永远指向最新版，不需要换）：**
 
@@ -69,7 +69,7 @@ dsh plugin --profile web add github:WOchovy233/dsh-cyber-egg
 2. 点击后下载安装包、校验签名与 sha256，再交给运行环境安装；
 3. 提示「已更新，刷新页面」或「重启 DSH 后生效」。
 
-`cyber-egg-latest.tgz` 是永久文件名，所以上面的直链和二维码不会失效。
+`cyber-egg-latest.tgz` 是永久文件名，所以上面的直链和二维码不会失效。每次发版只保留最新 Release 和对应 tag，旧版本会由发布脚本清理。
 
 ---
 
@@ -80,11 +80,14 @@ dsh plugin --profile web add github:WOchovy233/dsh-cyber-egg
 | `index.js` | Host 半身：HTTP API、市场安装、中转站签到、定时器、Kilo 转发、自更新 |
 | `client.js` | 浏览器半身：左侧栏入口 + 面板 UI |
 | `catalog.js` | 免费 token 来源数据（分级、额度、注册条件） |
+| `catalog.json` | 自动探测并签名的官方源清单（失败时回退到 catalog.js） |
 | `update.json` | 自更新清单（版本 / 下载地址 / sha256） |
 | `qr/*.png` | 下载二维码（最新包 / 版本页 / 仓库） |
 | `cyber-egg-*.tgz` | 可直接安装的插件包 |
 | `cordis.patch.yml` | bundle patch |
 | `locale/*.json` | 插件标题与描述（中英） |
+| `scripts/*.mjs` | 源清单探测、签名与清单校验脚本 |
+| `.github/workflows/*.yml` | CI 校验与每 3 天自动探测源清单 |
 
 ## 安全与限制
 
@@ -94,6 +97,7 @@ dsh plugin --profile web add github:WOchovy233/dsh-cyber-egg
 - 自更新清单带数字签名，版本号、校验值与下载地址都在签名范围内；镜像被篡改只会导致升级失败。验签失败时请到 Release 页面手动下载安装包。
 - 需要人类验证 / 图形验证码 / 微信小程序登录的站点无法自动签到。
 - 自更新依赖运行环境的插件管理服务；DSH Go 的本机引擎提供该服务，远程主机模式只支持插件开关。
+- 本仓库只包含插件代码、公开来源信息和公开下载地址；不包含任何用户 API Key、中转站口令、聊天记录、账号密码、个人邮箱或本机绝对路径。发布私钥与目录签名私钥均不进入仓库。
 
 ## License
 
