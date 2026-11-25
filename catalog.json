@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "version": "2026.11.21.1",
-  "updatedAt": "2026-11-20T17:40:46.857Z",
+  "version": "2026.11.25.1",
+  "updatedAt": "2026-11-25T11:06:32.011Z",
   "sources": [
     {
       "id": "siliconflow",
@@ -19,7 +19,14 @@
       "signupUrl": "https://cloud.siliconflow.cn/account/ak",
       "api": "openai-completions",
       "baseURL": "https://api.siliconflow.cn/v1",
-      "keyHint": "sk-..."
+      "keyHint": "sk-...",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "auth-required",
+        "httpStatus": 401,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "zhipu",
@@ -37,7 +44,14 @@
       "signupUrl": "https://open.bigmodel.cn/usercenter/apikeys",
       "api": "openai-completions",
       "baseURL": "https://open.bigmodel.cn/api/paas/v4",
-      "keyHint": "按官方密钥页复制"
+      "keyHint": "按官方密钥页复制",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "auth-required",
+        "httpStatus": 401,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "openrouter",
@@ -55,7 +69,14 @@
       "signupUrl": "https://openrouter.ai/keys",
       "api": "openai-completions",
       "baseURL": "https://openrouter.ai/api/v1",
-      "keyHint": "sk-or-v1-..."
+      "keyHint": "sk-or-v1-...",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "ok",
+        "httpStatus": 200,
+        "modelCount": 472,
+        "freeModelCount": 14
+      }
     },
     {
       "id": "groq",
@@ -73,7 +94,14 @@
       "signupUrl": "https://console.groq.com/keys",
       "api": "openai-completions",
       "baseURL": "https://api.groq.com/openai/v1",
-      "keyHint": "gsk_..."
+      "keyHint": "gsk_...",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "auth-required",
+        "httpStatus": 403,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "gemini",
@@ -91,7 +119,14 @@
       "signupUrl": "https://aistudio.google.com/apikey",
       "api": "google-generative-ai",
       "baseURL": "https://generativelanguage.googleapis.com/v1beta",
-      "keyHint": "AIza..."
+      "keyHint": "AIza...",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "unreachable",
+        "httpStatus": 0,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "modelscope",
@@ -109,7 +144,14 @@
       "signupUrl": "https://modelscope.cn/my/myaccesstoken",
       "api": "openai-completions",
       "baseURL": "https://api-inference.modelscope.cn/v1",
-      "keyHint": "ms-..."
+      "keyHint": "ms-...",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "ok",
+        "httpStatus": 200,
+        "modelCount": 38,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "cerebras",
@@ -127,7 +169,14 @@
       "signupUrl": "https://cloud.cerebras.ai",
       "api": "openai-completions",
       "baseURL": "https://api.cerebras.ai/v1",
-      "keyHint": "csk-..."
+      "keyHint": "csk-...",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "auth-required",
+        "httpStatus": 403,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "dashscope",
@@ -145,7 +194,14 @@
       "signupUrl": "https://bailian.console.aliyun.com/?apiKey=1",
       "api": "openai-completions",
       "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "keyHint": "sk-..."
+      "keyHint": "sk-...",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "auth-required",
+        "httpStatus": 401,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "ark",
@@ -163,7 +219,14 @@
       "signupUrl": "https://console.volcengine.com/ark",
       "api": "openai-completions",
       "baseURL": "https://ark.cn-beijing.volces.com/api/v3",
-      "keyHint": "方舟 API Key"
+      "keyHint": "方舟 API Key",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "auth-required",
+        "httpStatus": 401,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "mistral",
@@ -181,7 +244,14 @@
       "signupUrl": "https://console.mistral.ai/api-keys",
       "api": "openai-completions",
       "baseURL": "https://api.mistral.ai/v1",
-      "keyHint": "按官方密钥页复制"
+      "keyHint": "按官方密钥页复制",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "unreachable",
+        "httpStatus": 0,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "together",
@@ -199,7 +269,14 @@
       "signupUrl": "https://api.together.ai/settings/api-keys",
       "api": "openai-completions",
       "baseURL": "https://api.together.xyz/v1",
-      "keyHint": "按官方密钥页复制"
+      "keyHint": "按官方密钥页复制",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "auth-required",
+        "httpStatus": 403,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "spark",
@@ -217,7 +294,14 @@
       "signupUrl": "https://console.xfyun.cn/services/cbm",
       "api": "openai-completions",
       "baseURL": "https://spark-api-open.xf-yun.com/v1",
-      "keyHint": "APIPassword"
+      "keyHint": "APIPassword",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "auth-required",
+        "httpStatus": 401,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     },
     {
       "id": "github",
@@ -235,7 +319,14 @@
       "signupUrl": "https://github.com/settings/tokens",
       "api": "openai-completions",
       "baseURL": "https://models.github.ai/inference",
-      "keyHint": "github_pat_..."
+      "keyHint": "github_pat_...",
+      "probe": {
+        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "status": "invalid",
+        "httpStatus": 200,
+        "modelCount": 0,
+        "freeModelCount": 0
+      }
     }
   ],
   "accessLabels": {
@@ -243,5 +334,7 @@
     "cn-vpn": "国内需梯子",
     "cn-card": "需海外手机号 / 信用卡"
   },
-  "signature": "fIFweYK3ZjUyvTzsU6kQ4N9UbmVB3DbmpuVm0drv3uvnPMhHmR/95ohcoJHn7lUCK2xmKFKNrLDSrLxWj+RGDw=="
+  "autoCheckAt": "2026-11-25T11:06:32.011Z",
+  "catalogSignature": "ePvHxFeB2YFAo+qAy3PhV6aS4XJilqGP8J+x3Yp9TONoWdVx6XvTJjA3JwfhkFeMysCaMUztRey0gAZGEEzgBQ==",
+  "signature": "sS4ZPFWOWyma0lZfdgK/Lk6CWvFs/f53qXyIXWZm+usrTS3FdFOiqQQYlUqoZb64Wt0aOAaWHtK//vMq38SkCQ=="
 }
