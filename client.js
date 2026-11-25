@@ -80,6 +80,12 @@ window.__ModuleLoader__.load({
         'catalog.lane.mirror': '国内镜像',
         'catalog.cache': '每 3 天检查一次，本次复用本地缓存；下次检查 {time}',
         'catalog.fresh': '每 3 天检查一次；下次检查 {time}',
+        'probe.ok': '自动探测：可访问',
+        'probe.auth': '自动探测：需 Key',
+        'probe.http': '自动探测：接口异常',
+        'probe.unreachable': '自动探测：不可达',
+        'probe.invalid': '自动探测：响应异常',
+        'probe.models': '{n} 个模型 · {free} 个免费',
         'refreshEggs': '刷新鸡蛋',
         'refreshing': '刷新中…',
         'showAll': '展开全部 {n} 个',
@@ -263,6 +269,12 @@ window.__ModuleLoader__.load({
         'catalog.lane.mirror': 'Mirror',
         'catalog.cache': 'Checked every 3 days; using cache this time. Next check {time}',
         'catalog.fresh': 'Checked every 3 days; next check {time}',
+        'probe.ok': 'Auto probe: reachable',
+        'probe.auth': 'Auto probe: key required',
+        'probe.http': 'Auto probe: endpoint error',
+        'probe.unreachable': 'Auto probe: unreachable',
+        'probe.invalid': 'Auto probe: bad response',
+        'probe.models': '{n} models · {free} free',
         'refreshEggs': 'Refresh eggs',
         'refreshing': 'Refreshing…',
         'showAll': 'Show all {n}',
@@ -1064,6 +1076,12 @@ window.__ModuleLoader__.load({
         const working = Boolean(busy[source.id])
         const error = errors[source.id]
         const accessText = (accessLabels && accessLabels[source.access]) || source.access || ''
+        const probeKey = source.probe
+          ? { ok: 'probe.ok', 'auth-required': 'probe.auth', 'http-error': 'probe.http', unreachable: 'probe.unreachable', invalid: 'probe.invalid' }[source.probe.status]
+          : ''
+        const probeText = probeKey
+          ? t(probeKey) + (source.probe.modelCount ? ` · ${t('probe.models', { n: source.probe.modelCount, free: source.probe.freeModelCount || 0 })}` : '')
+          : ''
         const accessClass =
           source.access === 'cn-direct' ? 'ce-pill ok' : source.access === 'cn-card' ? 'ce-pill bad' : 'ce-pill warn'
         return h(
@@ -1096,6 +1114,9 @@ window.__ModuleLoader__.load({
           source.blurb ? h('div', { className: 'ce-blurb' }, source.blurb) : null,
           source.detail ? h('div', { className: 'ce-detail' }, source.detail) : null,
           source.dailyNote ? h('div', { className: 'ce-hint' }, source.dailyNote) : null,
+          probeText
+            ? h('div', { className: 'ce-hint', title: source.probe.checkedAt || '' }, probeText)
+            : null,
           h(
             'div',
             { className: 'ce-row end' },
