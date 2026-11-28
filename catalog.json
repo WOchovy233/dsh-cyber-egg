@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "version": "2026.11.25.1",
-  "updatedAt": "2026-11-25T11:06:32.011Z",
+  "version": "2026.11.28.1",
+  "updatedAt": "2026-11-28T12:57:01.494Z",
   "sources": [
     {
       "id": "siliconflow",
@@ -21,7 +21,7 @@
       "baseURL": "https://api.siliconflow.cn/v1",
       "keyHint": "sk-...",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "auth-required",
         "httpStatus": 401,
         "modelCount": 0,
@@ -46,7 +46,7 @@
       "baseURL": "https://open.bigmodel.cn/api/paas/v4",
       "keyHint": "按官方密钥页复制",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "auth-required",
         "httpStatus": 401,
         "modelCount": 0,
@@ -71,11 +71,11 @@
       "baseURL": "https://openrouter.ai/api/v1",
       "keyHint": "sk-or-v1-...",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "ok",
         "httpStatus": 200,
-        "modelCount": 472,
-        "freeModelCount": 14
+        "modelCount": 476,
+        "freeModelCount": 13
       }
     },
     {
@@ -96,9 +96,9 @@
       "baseURL": "https://api.groq.com/openai/v1",
       "keyHint": "gsk_...",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "auth-required",
-        "httpStatus": 403,
+        "httpStatus": 401,
         "modelCount": 0,
         "freeModelCount": 0
       }
@@ -121,9 +121,9 @@
       "baseURL": "https://generativelanguage.googleapis.com/v1beta",
       "keyHint": "AIza...",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
-        "status": "unreachable",
-        "httpStatus": 0,
+        "checkedAt": "2026-11-28T12:57:01.494Z",
+        "status": "auth-required",
+        "httpStatus": 403,
         "modelCount": 0,
         "freeModelCount": 0
       }
@@ -146,7 +146,7 @@
       "baseURL": "https://api-inference.modelscope.cn/v1",
       "keyHint": "ms-...",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "ok",
         "httpStatus": 200,
         "modelCount": 38,
@@ -171,7 +171,7 @@
       "baseURL": "https://api.cerebras.ai/v1",
       "keyHint": "csk-...",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "auth-required",
         "httpStatus": 403,
         "modelCount": 0,
@@ -196,7 +196,7 @@
       "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "keyHint": "sk-...",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "auth-required",
         "httpStatus": 401,
         "modelCount": 0,
@@ -221,7 +221,7 @@
       "baseURL": "https://ark.cn-beijing.volces.com/api/v3",
       "keyHint": "方舟 API Key",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "auth-required",
         "httpStatus": 401,
         "modelCount": 0,
@@ -246,9 +246,9 @@
       "baseURL": "https://api.mistral.ai/v1",
       "keyHint": "按官方密钥页复制",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
-        "status": "unreachable",
-        "httpStatus": 0,
+        "checkedAt": "2026-11-28T12:57:01.494Z",
+        "status": "auth-required",
+        "httpStatus": 401,
         "modelCount": 0,
         "freeModelCount": 0
       }
@@ -271,9 +271,9 @@
       "baseURL": "https://api.together.xyz/v1",
       "keyHint": "按官方密钥页复制",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "auth-required",
-        "httpStatus": 403,
+        "httpStatus": 401,
         "modelCount": 0,
         "freeModelCount": 0
       }
@@ -296,7 +296,7 @@
       "baseURL": "https://spark-api-open.xf-yun.com/v1",
       "keyHint": "APIPassword",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "auth-required",
         "httpStatus": 401,
         "modelCount": 0,
@@ -321,7 +321,7 @@
       "baseURL": "https://models.github.ai/inference",
       "keyHint": "github_pat_...",
       "probe": {
-        "checkedAt": "2026-11-25T11:06:32.011Z",
+        "checkedAt": "2026-11-28T12:57:01.494Z",
         "status": "invalid",
         "httpStatus": 200,
         "modelCount": 0,
@@ -334,6 +334,6 @@
     "cn-vpn": "国内需梯子",
     "cn-card": "需海外手机号 / 信用卡"
   },
-  "autoCheckAt": "2026-11-25T11:06:32.011Z",
-  "catalogSignature": "ePvHxFeB2YFAo+qAy3PhV6aS4XJilqGP8J+x3Yp9TONoWdVx6XvTJjA3JwfhkFeMysCaMUztRey0gAZGEEzgBQ=="
+  "autoCheckAt": "2026-11-28T12:57:01.494Z",
+  "catalogSignature": "dSyorJ4VaOIN9U1wjyjKKaNU6J8loRwUQWpG4qG5Vgs5yT2rC5Y7tGY+KctfFDnju/mFo1czMwmDxYHtShJtAQ=="
 }
